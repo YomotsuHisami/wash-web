@@ -70,21 +70,6 @@ npm run build
 
 构建结果输出到 `dist/`。
 
-## 生产模式说明
-
-`package.json` 中的 `start` 脚本为：
-
-```bash
-tsx server.ts
-```
-
-该启动方式适合本地运行 TypeScript 服务端代码。若要正式部署，建议选择以下其中一种方式：
-
-- 将服务端单独编译后再由 Node 启动
-- 保留 `tsx server.ts` 作为轻量部署方式
-
-如果仅做本地开发与演示，直接使用 `npm run dev` 即可。
-
 ## 默认数据文件
 
 服务启动时会自动检查并初始化以下文件：
