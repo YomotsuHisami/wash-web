@@ -4,7 +4,9 @@
 
 ## 效果截图
 
-![首页效果图](./docs/home-preview.png)
+<p align="center">
+  <img src="./docs/home-preview.png" alt="首页效果图" width="280" />
+</p>
 
 ## 项目特点
 
