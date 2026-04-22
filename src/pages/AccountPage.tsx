@@ -19,16 +19,17 @@ import {
   personCircleOutline,
   sparklesOutline,
 } from 'ionicons/icons';
-import { useEffect, useState } from 'react';
-import { useHistory } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useHistory, useLocation } from 'react-router-dom';
 import { fetchDiscounts, fetchShops } from '../api/catalog';
 import {
   fetchUserProfile,
   loginUser,
   registerUser,
-  updateDefaultInfo,
+  updateOrderInfos,
   updatePassword,
 } from '../api/users';
+import OrderInfoManager from '../components/account/OrderInfoManager';
 import AuthPanel from '../components/account/AuthPanel';
 import AppLoadingOverlay from '../components/common/AppLoadingOverlay';
 import CardSkeleton from '../components/common/CardSkeleton';
@@ -37,25 +38,28 @@ import LoadingButton from '../components/common/LoadingButton';
 import PageHeader from '../components/common/PageHeader';
 import { brandConfig } from '../config/brand';
 import { campaignAssets, resolveDiscountImage } from '../config/campaigns';
-import { CustomerInfo, Discount, Shop, UserProfile, isDiscountActive } from '../models/domain';
+import { Discount, SavedOrderInfo, Shop, UserProfile, isDiscountActive } from '../models/domain';
 import { clearStoredUser, getStoredUser, setStoredUser } from '../utils/storage';
-
-const defaultDraft: Partial<CustomerInfo> = {
-  name: '',
-  phone: '',
-  address: '',
-  preferredShop: '',
-  pickupTime: '',
-  notes: '',
-};
+import {
+  getDefaultOrderInfo,
+  getOrderInfos,
+  getSelectedOrderInfo,
+  hasRequiredOrderInfo,
+  migrateUserProfileOrderInfos,
+} from '../utils/orderInfoUtils';
 
 export default function AccountPage() {
   const history = useHistory();
+  const location = useLocation();
+  const returnTo = useMemo(() => {
+    const raw = new URLSearchParams(location.search).get('returnTo');
+    return raw ? decodeURIComponent(raw) : '';
+  }, [location.search]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [shops, setShops] = useState<Shop[]>([]);
   const [discounts, setDiscounts] = useState<Discount[]>([]);
-  const [defaultInfo, setDefaultInfo] = useState<Partial<CustomerInfo>>(defaultDraft);
+  const [selectedOrderInfoId, setSelectedOrderInfoId] = useState<string>('');
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -71,6 +75,12 @@ export default function AccountPage() {
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordMessage, setPasswordMessage] = useState('');
 
+  const navigateBackToFlow = (profile: UserProfile) => {
+    const defaultOrderInfo = getDefaultOrderInfo(profile);
+    if (!returnTo || !hasRequiredOrderInfo(defaultOrderInfo)) return;
+    history.replace(returnTo);
+  };
+
   useEffect(() => {
     let mounted = true;
 
@@ -82,7 +92,7 @@ export default function AccountPage() {
 
         if (storedUser?.id) {
           try {
-            profile = await fetchUserProfile(storedUser.id);
+            profile = migrateUserProfileOrderInfos(await fetchUserProfile(storedUser.id));
             setStoredUser(profile);
           } catch {
             clearStoredUser();
@@ -91,7 +101,9 @@ export default function AccountPage() {
 
         if (mounted) {
           setCurrentUser(profile);
-          setDefaultInfo(profile?.defaultInfo || defaultDraft);
+          setSelectedOrderInfoId(
+            getDefaultOrderInfo(profile)?.id || getOrderInfos(profile)[0]?.id || ''
+          );
           setShops(nextShops);
           setDiscounts(nextDiscounts.filter(isDiscountActive));
         }
@@ -129,14 +141,21 @@ export default function AccountPage() {
     try {
       const profile =
         mode === 'login'
-          ? await loginUser(username, password)
-          : await registerUser(username, password);
+          ? migrateUserProfileOrderInfos(await loginUser(username, password))
+          : migrateUserProfileOrderInfos(await registerUser(username, password));
       setCurrentUser(profile);
       setStoredUser(profile);
-      setDefaultInfo(profile.defaultInfo || defaultDraft);
+      setSelectedOrderInfoId(
+        getDefaultOrderInfo(profile)?.id || getOrderInfos(profile)[0]?.id || ''
+      );
       setPassword('');
       setConfirmPassword('');
-      setAuthSuccess(mode === 'login' ? '登录成功。' : '注册成功，已自动登录。');
+      if (returnTo && !hasRequiredOrderInfo(getDefaultOrderInfo(profile))) {
+        setAuthSuccess('账号已就绪，请先补全默认订单资料后继续下单。');
+      } else {
+        setAuthSuccess(mode === 'login' ? '登录成功。' : '注册成功，已自动登录。');
+      }
+      navigateBackToFlow(profile);
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : '登录失败，请稍后重试。');
     } finally {
@@ -147,29 +166,73 @@ export default function AccountPage() {
   const handleLogout = () => {
     clearStoredUser();
     setCurrentUser(null);
-    setDefaultInfo(defaultDraft);
+    setSelectedOrderInfoId('');
     setAuthError('');
     setAuthSuccess('');
   };
 
-  const handleProfileSave = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const handleOrderInfosChange = async (
+    nextOrderInfos: SavedOrderInfo[],
+    nextDefaultInfoId?: string | null,
+    nextSelectedId?: string | null
+  ) => {
     if (!currentUser) return;
 
     setProfileLoading(true);
     setProfileMessage('');
 
     try {
-      const profile = await updateDefaultInfo(currentUser.id, defaultInfo);
+      const profile = migrateUserProfileOrderInfos(
+        await updateOrderInfos(currentUser.id, {
+          orderInfos: nextOrderInfos,
+          defaultInfoId: nextDefaultInfoId || nextOrderInfos[0]?.id || '',
+        })
+      );
       setCurrentUser(profile);
       setStoredUser(profile);
-      setDefaultInfo(profile.defaultInfo || defaultDraft);
-      setProfileMessage('默认资料已保存，下单时会自动回填。');
+      setSelectedOrderInfoId(
+        nextSelectedId ||
+          nextDefaultInfoId ||
+          getSelectedOrderInfo(profile, selectedOrderInfoId)?.id ||
+          getDefaultOrderInfo(profile)?.id ||
+          ''
+      );
+      setProfileMessage(
+        returnTo
+          ? '默认资料已保存，正在返回下单流程。'
+          : '默认资料已保存，下单时会自动回填。'
+      );
+      navigateBackToFlow(profile);
     } catch (error) {
       setProfileMessage(error instanceof Error ? error.message : '保存失败，请稍后重试。');
     } finally {
       setProfileLoading(false);
     }
+  };
+
+  const handleOrderInfoSave = async ({
+    orderInfo,
+    mode,
+    setAsDefault,
+  }: {
+    orderInfo: SavedOrderInfo;
+    mode: 'create' | 'edit';
+    setAsDefault: boolean;
+  }) => {
+    const orderInfos = getOrderInfos(currentUser);
+    const nextOrderInfos =
+      mode === 'create'
+        ? [...orderInfos, orderInfo]
+        : orderInfos.map((item) => (item.id === orderInfo.id ? orderInfo : item));
+    const nextDefaultInfoId =
+      setAsDefault || !currentUser?.defaultInfoId
+        ? orderInfo.id
+        : currentUser.defaultInfoId;
+    await handleOrderInfosChange(nextOrderInfos, nextDefaultInfoId, orderInfo.id);
+  };
+
+  const handleSetDefaultOrderInfo = async (id: string) => {
+    await handleOrderInfosChange(getOrderInfos(currentUser), id, id);
   };
 
   const handlePasswordSave = async (event: React.FormEvent) => {
@@ -204,6 +267,7 @@ export default function AccountPage() {
 
   const vipPromo =
     discounts.find((discount) => discount.applicableGroup === 'vip') || null;
+  const orderInfos = getOrderInfos(currentUser);
 
   return (
     <IonPage>
@@ -233,6 +297,11 @@ export default function AccountPage() {
                     <IonIcon icon={personCircleOutline} />
                     登录后可保存默认资料和会员状态
                   </div>
+                  {returnTo ? (
+                    <p className="muted" style={{ margin: 0 }}>
+                      继续下单前，需要先登录账号并补全默认订单资料。
+                    </p>
+                  ) : null}
                   <AuthPanel
                     confirmPassword={confirmPassword}
                     error={authError}
@@ -268,7 +337,10 @@ export default function AccountPage() {
                     当前身份：{currentUser.group === 'vip' ? '会员' : '普通用户'}
                   </div>
                   <h2 style={{ margin: 0 }}>{currentUser.username}</h2>
-                  <p>常用地址、电话和门店都可以保存在这里，下次下单会直接带出。</p>
+                  <p>
+                    常用地址、电话和门店都可以保存在这里，下次下单会直接带出。
+                    {returnTo ? ' 当前下单流程会直接读取这里的默认资料。' : ''}
+                  </p>
                   <div className="inline-actions">
                     <IonButton shape="round" onClick={() => history.push('/membership')}>
                       {currentUser.group === 'vip' ? '查看会员权益' : '立即开通会员'}
@@ -279,84 +351,26 @@ export default function AccountPage() {
 
               <IonCard className="surface-card">
                 <IonCardContent>
-                  <form className="stack-section" onSubmit={handleProfileSave}>
+                  <div className="stack-section">
                     <div>
-                      <p className="page-eyebrow">DEFAULT INFO</p>
-                      <h3 style={{ marginTop: 0 }}>默认订单资料</h3>
+                      <p className="page-eyebrow">ORDER INFOS</p>
+                      <h3 style={{ marginTop: 0 }}>订单资料管理</h3>
                     </div>
-                    <IonItem className="field-item">
-                      <IonLabel position="stacked">姓名</IonLabel>
-                      <IonInput
-                        value={defaultInfo.name || ''}
-                        onIonInput={(e) =>
-                          setDefaultInfo((prev) => ({ ...prev, name: e.detail.value || '' }))
-                        }
-                      />
-                    </IonItem>
-                    <IonItem className="field-item">
-                      <IonLabel position="stacked">电话</IonLabel>
-                      <IonInput
-                        value={defaultInfo.phone || ''}
-                        onIonInput={(e) =>
-                          setDefaultInfo((prev) => ({ ...prev, phone: e.detail.value || '' }))
-                        }
-                      />
-                    </IonItem>
-                    <IonItem className="field-item">
-                      <IonLabel position="stacked">取件地址</IonLabel>
-                      <IonInput
-                        value={defaultInfo.address || ''}
-                        onIonInput={(e) =>
-                          setDefaultInfo((prev) => ({ ...prev, address: e.detail.value || '' }))
-                        }
-                      />
-                    </IonItem>
-                    <IonItem className="field-item">
-                      <IonLabel position="stacked">常用门店</IonLabel>
-                      <IonSelect
-                        value={defaultInfo.preferredShop || ''}
-                        onIonChange={(e) =>
-                          setDefaultInfo((prev) => ({ ...prev, preferredShop: e.detail.value || '' }))
-                        }
-                      >
-                        <IonSelectOption value="">不指定</IonSelectOption>
-                        {shops.map((shop) => (
-                          <IonSelectOption key={shop.id} value={shop.name}>
-                            {shop.name}
-                          </IonSelectOption>
-                        ))}
-                      </IonSelect>
-                    </IonItem>
-                    <IonItem className="field-item">
-                      <IonLabel position="stacked">期望取件时间</IonLabel>
-                      <IonSelect
-                        value={defaultInfo.pickupTime || ''}
-                        onIonChange={(e) =>
-                          setDefaultInfo((prev) => ({ ...prev, pickupTime: e.detail.value || '' }))
-                        }
-                      >
-                        <IonSelectOption value="">不固定</IonSelectOption>
-                        <IonSelectOption value="尽快">尽快</IonSelectOption>
-                        <IonSelectOption value="今天下午">今天下午</IonSelectOption>
-                        <IonSelectOption value="明天上午">明天上午</IonSelectOption>
-                        <IonSelectOption value="周末">周末</IonSelectOption>
-                      </IonSelect>
-                    </IonItem>
-                    <IonItem className="field-item">
-                      <IonLabel position="stacked">备注</IonLabel>
-                      <IonTextarea
-                        autoGrow
-                        value={defaultInfo.notes || ''}
-                        onIonInput={(e) =>
-                          setDefaultInfo((prev) => ({ ...prev, notes: e.detail.value || '' }))
-                        }
-                      />
-                    </IonItem>
+                    <OrderInfoManager
+                      defaultInfoId={currentUser?.defaultInfoId}
+                      onSave={handleOrderInfoSave}
+                      onSelect={setSelectedOrderInfoId}
+                      onSetDefault={handleSetDefaultOrderInfo}
+                      orderInfos={orderInfos}
+                      saveButtonLabel="保存资料"
+                      saving={profileLoading}
+                      selectedOrderInfoId={selectedOrderInfoId}
+                      shops={shops}
+                      subtitle="保存多份常用资料，支付时可以直接切换。"
+                      title="订单资料"
+                    />
                     {profileMessage ? <p className="form-message">{profileMessage}</p> : null}
-                    <LoadingButton expand="block" loading={profileLoading} shape="round" type="submit">
-                      保存默认资料
-                    </LoadingButton>
-                  </form>
+                  </div>
                 </IonCardContent>
               </IonCard>
 

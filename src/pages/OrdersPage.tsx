@@ -148,10 +148,19 @@ export default function OrdersPage() {
                           <div>
                             <strong>金额</strong>
                             <p className="muted" style={{ marginTop: 6 }}>
-                              ¥{order.totalPrice} · {order.customerInfo.preferredShop || '未指定店铺'}
+                              预付 ¥{order.totalPrice} · {order.customerInfo.preferredShop || '未指定店铺'}
                             </p>
                           </div>
                         </div>
+                        {order.selectedServicePlan ? (
+                          <div className="feature-item">
+                            <strong>{order.selectedServicePlan.title}</strong>
+                            <p>
+                              {order.selectedServicePlan.shopName} · 预计 {order.selectedServicePlan.estimatedTurnaround}
+                            </p>
+                            <p>最终价格会在平台取鞋后经人工与 AI 复核，多退少补。</p>
+                          </div>
+                        ) : null}
                       </IonCardContent>
                     </IonCard>
                   ))}
@@ -207,7 +216,16 @@ export default function OrdersPage() {
                       <br />
                       {serverOrder.userAddress || serverOrder.customerInfo?.address}
                     </p>
-                    <strong>¥{serverOrder.price || serverOrder.totalPrice}</strong>
+                    <strong>预付 ¥{serverOrder.price || serverOrder.totalPrice}</strong>
+                    {serverOrder.selectedServicePlan ? (
+                      <div className="feature-item">
+                        <strong>{serverOrder.selectedServicePlan.title}</strong>
+                        <p>
+                          {serverOrder.selectedServicePlan.shopName} · 预计 {serverOrder.selectedServicePlan.estimatedTurnaround}
+                        </p>
+                        <p>最终价格会在平台取鞋后经人工与 AI 复核，多退少补。</p>
+                      </div>
+                    ) : null}
                   </IonCardContent>
                 </IonCard>
               ) : null}

@@ -4,17 +4,25 @@ import { Discount } from '../../models/domain';
 interface Props {
   baseFee: number;
   damageTotal: number;
+  serviceFee?: number;
+  addonTotal?: number;
+  discountAmount?: number;
   total: number;
   selectedDiscount?: Discount | null;
+  totalLabel?: string;
 }
 
 export default function PriceSummaryCard({
   baseFee,
   damageTotal,
+  serviceFee = 0,
+  addonTotal = 0,
+  discountAmount = 0,
   total,
   selectedDiscount,
+  totalLabel = '合计',
 }: Props) {
-  const subtotal = baseFee + damageTotal;
+  const subtotal = baseFee + damageTotal + serviceFee + addonTotal;
 
   return (
     <IonCard className="surface-card price-card">
@@ -27,6 +35,18 @@ export default function PriceSummaryCard({
           <span>污损附加</span>
           <strong>¥{damageTotal}</strong>
         </div>
+        {serviceFee > 0 ? (
+          <div className="price-row">
+            <span>方案服务费</span>
+            <strong>¥{serviceFee}</strong>
+          </div>
+        ) : null}
+        {addonTotal > 0 ? (
+          <div className="price-row">
+            <span>增值服务</span>
+            <strong>¥{addonTotal}</strong>
+          </div>
+        ) : null}
         <div className="price-row">
           <span>小计</span>
           <strong>¥{subtotal}</strong>
@@ -37,8 +57,14 @@ export default function PriceSummaryCard({
             <strong>{(selectedDiscount.rate / 10).toFixed(1).replace(/\.0$/, '')} 折</strong>
           </div>
         ) : null}
+        {discountAmount > 0 ? (
+          <div className="price-row discount-row">
+            <span>优惠减免</span>
+            <strong>-¥{discountAmount}</strong>
+          </div>
+        ) : null}
         <div className="price-row price-row--total">
-          <span>合计</span>
+          <span>{totalLabel}</span>
           <strong>¥{total}</strong>
         </div>
       </IonCardContent>

@@ -3,18 +3,33 @@ export interface DamageItem {
   type: string;
   severity: '轻度' | '中度' | '重度';
   surcharge: number;
+  note?: string;
+}
+
+export type ShoeConditionLevel = '轻度' | '中度' | '重度';
+export type ServicePreference = 'balanced' | 'value' | 'quality' | 'speed' | 'oxidation';
+
+export interface ShoeMaterialPart {
+  part: string;
+  material: string;
 }
 
 export interface ShoeData {
+  shoeType: string;
   brand: string;
   model: string;
   series: string;
   confidence: number;
-  material: string;
+  materials: ShoeMaterialPart[];
+  wearLevel: ShoeConditionLevel;
+  conditionSummary: string;
   careTip: string;
   damages: DamageItem[];
+  renewalScore: number;
+  estimatedTurnaround: string;
   pricing: {
     baseFee: number;
+    manualReviewNote?: string;
   };
 }
 
@@ -25,6 +40,12 @@ export interface CustomerInfo {
   preferredShop: string;
   pickupTime: string;
   notes: string;
+  servicePreference?: ServicePreference;
+}
+
+export interface SavedOrderInfo extends CustomerInfo {
+  id: string;
+  label: string;
 }
 
 export type OrderStatus =
@@ -37,10 +58,35 @@ export type OrderStatus =
 export interface PricingBreakdown {
   baseFee: number;
   damageTotal: number;
+  serviceFee?: number;
+  addonTotal?: number;
   subtotal: number;
+  discountAmount?: number;
+  selectedPlanId?: string;
+  selectedPlanTitle?: string;
   discountId?: string;
   discountTitle?: string;
   discountRate?: number;
+  total?: number;
+}
+
+export interface ServiceRecommendation {
+  id: string;
+  strategy: 'recommended' | 'value' | 'premium' | 'oxidation';
+  title: string;
+  shopId: string;
+  shopName: string;
+  summary: string;
+  reason: string;
+  matchScore: number;
+  distanceKm: number;
+  estimatedTurnaround: string;
+  serviceFee: number;
+  addonTotal: number;
+  prepayPrice: number;
+  includedServices: string[];
+  valueAdds: string[];
+  caution: string;
 }
 
 export interface Order {
@@ -49,6 +95,8 @@ export interface Order {
   status: OrderStatus;
   shoeData: ShoeData;
   customerInfo: CustomerInfo;
+  selectedServicePlan?: ServiceRecommendation;
+  alternativePlans?: ServiceRecommendation[];
   totalPrice: number;
 }
 
@@ -70,6 +118,13 @@ export interface Shop {
   id: string;
   name: string;
   address: string;
+  distanceKm?: number;
+  qualityScore?: number;
+  valueScore?: number;
+  speedScore?: number;
+  oxidationScore?: number;
+  specialtyMaterials?: string[];
+  specialtyServices?: string[];
 }
 
 export interface UserProfile {
@@ -77,6 +132,8 @@ export interface UserProfile {
   username: string;
   group: UserGroup;
   defaultInfo?: Partial<CustomerInfo>;
+  defaultInfoId?: string;
+  orderInfos?: SavedOrderInfo[];
 }
 
 export interface ServerOrder extends Order {
@@ -86,6 +143,7 @@ export interface ServerOrder extends Order {
   preferredShop?: string;
   pickupTime?: string;
   notes?: string;
+  servicePreference?: ServicePreference;
   price?: number;
   analysisResult?: ShoeData;
   imageUrl?: string;
