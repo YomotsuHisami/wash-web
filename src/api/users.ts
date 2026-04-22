@@ -1,5 +1,5 @@
 import { apiRequest } from './client';
-import { CustomerInfo, UserProfile } from '../models/domain';
+import { CustomerInfo, SavedOrderInfo, UserProfile } from '../models/domain';
 
 export function registerUser(username: string, password: string) {
   return apiRequest<UserProfile>('/api/users/register', {
@@ -21,6 +21,16 @@ export function fetchUserProfile(id: string) {
 
 export function updateDefaultInfo(id: string, payload: Partial<CustomerInfo>) {
   return apiRequest<UserProfile>(`/api/users/${id}/defaultInfo`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateOrderInfos(
+  id: string,
+  payload: { orderInfos: SavedOrderInfo[]; defaultInfoId?: string | null }
+) {
+  return apiRequest<UserProfile>(`/api/users/${id}/orderInfos`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   });

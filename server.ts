@@ -33,9 +33,42 @@ if (!fs.existsSync(SHOPS_FILE)) {
   fs.writeFileSync(
     SHOPS_FILE,
     JSON.stringify([
-      { id: "1", name: "1鞋店", address: "北苑路1号" },
-      { id: "2", name: "2鞋店", address: "南苑路2号" },
-      { id: "3", name: "3鞋店", address: "东苑路3号" },
+      {
+        id: "1",
+        name: "1鞋店",
+        address: "北苑路1号",
+        distanceKm: 2.6,
+        qualityScore: 86,
+        valueScore: 84,
+        speedScore: 91,
+        oxidationScore: 72,
+        specialtyMaterials: ["网布拼接", "合成革", "橡胶大底"],
+        specialtyServices: ["当日快洗", "基础精洗", "鞋底护理"],
+      },
+      {
+        id: "2",
+        name: "2鞋店",
+        address: "南苑路2号",
+        distanceKm: 1.8,
+        qualityScore: 90,
+        valueScore: 76,
+        speedScore: 78,
+        oxidationScore: 92,
+        specialtyMaterials: ["头层牛皮", "麂皮", "漆皮涂层"],
+        specialtyServices: ["深度精洗", "去氧化", "皮面养护"],
+      },
+      {
+        id: "3",
+        name: "3鞋店",
+        address: "东苑路3号",
+        distanceKm: 3.4,
+        qualityScore: 82,
+        valueScore: 93,
+        speedScore: 86,
+        oxidationScore: 74,
+        specialtyMaterials: ["Primeknit 编织", "网布拼接", "Boost 发泡"],
+        specialtyServices: ["轻奢快洗", "中底提亮", "高性价比套餐"],
+      },
     ])
   );
 }
@@ -342,6 +375,38 @@ async function startServer() {
 
   // --- User Accounts & Membership ---
 
+  const normalizeUserPayload = (user: any) => {
+    const legacyDefault =
+      user.defaultInfo && Object.values(user.defaultInfo).some(Boolean)
+        ? {
+            id: user.defaultInfoId || "legacy-default-order-info",
+            label: "默认订单资料",
+            ...user.defaultInfo,
+          }
+        : null;
+
+    const orderInfos = Array.isArray(user.orderInfos)
+      ? user.orderInfos
+      : legacyDefault
+      ? [legacyDefault]
+      : [];
+
+    const defaultInfoId =
+      user.defaultInfoId && orderInfos.some((item: any) => item.id === user.defaultInfoId)
+        ? user.defaultInfoId
+        : orderInfos[0]?.id;
+
+    const defaultInfo =
+      orderInfos.find((item: any) => item.id === defaultInfoId) || orderInfos[0] || {};
+
+    return {
+      ...user,
+      orderInfos,
+      defaultInfoId,
+      defaultInfo,
+    };
+  };
+
   app.post("/api/users/register", (req, res) => {
     const { username, password } = req.body;
 
@@ -359,18 +424,15 @@ async function startServer() {
       username,
       password,
       group: "normal",
+      defaultInfoId: "",
+      orderInfos: [],
       defaultInfo: {},
     };
 
     users.push(newUser);
     writeJsonFile(USERS_FILE, users);
 
-    res.json({
-      id: newUser.id,
-      username: newUser.username,
-      group: newUser.group,
-      defaultInfo: newUser.defaultInfo,
-    });
+    res.json(normalizeUserPayload(newUser));
   });
 
   app.post("/api/users/login", (req, res) => {
@@ -388,12 +450,7 @@ async function startServer() {
       return res.status(401).json({ error: "用户名或密码错误" });
     }
 
-    res.json({
-      id: user.id,
-      username: user.username,
-      group: user.group,
-      defaultInfo: user.defaultInfo || {},
-    });
+    res.json(normalizeUserPayload(user));
   });
 
   app.get("/api/users/:id", (req, res) => {
@@ -405,12 +462,7 @@ async function startServer() {
       return res.status(404).json({ error: "用户不存在" });
     }
 
-    res.json({
-      id: user.id,
-      username: user.username,
-      group: user.group,
-      defaultInfo: user.defaultInfo || {},
-    });
+    res.json(normalizeUserPayload(user));
   });
 
   app.put("/api/users/:id/defaultInfo", (req, res) => {
@@ -424,19 +476,69 @@ async function startServer() {
       return res.status(404).json({ error: "用户不存在" });
     }
 
-    users[index].defaultInfo = {
-      ...(users[index].defaultInfo || {}),
+    const normalizedUser = normalizeUserPayload(users[index]);
+    const defaultInfoId = normalizedUser.defaultInfoId || `order-info-${Date.now()}`;
+    const existingIndex = normalizedUser.orderInfos.findIndex(
+      (item: any) => item.id === defaultInfoId
+    );
+    const nextOrderInfo = {
+      ...(normalizedUser.orderInfos[existingIndex] || {
+        id: defaultInfoId,
+        label: "默认订单资料",
+      }),
       ...defaultInfo,
+      id: defaultInfoId,
+      label:
+        defaultInfo.label ||
+        normalizedUser.orderInfos[existingIndex]?.label ||
+        "默认订单资料",
+    };
+
+    if (existingIndex >= 0) {
+      normalizedUser.orderInfos[existingIndex] = nextOrderInfo;
+    } else {
+      normalizedUser.orderInfos = [...normalizedUser.orderInfos, nextOrderInfo];
+    }
+
+    users[index] = {
+      ...users[index],
+      orderInfos: normalizedUser.orderInfos,
+      defaultInfoId,
+      defaultInfo: nextOrderInfo,
     };
 
     writeJsonFile(USERS_FILE, users);
 
-    res.json({
-      id: users[index].id,
-      username: users[index].username,
-      group: users[index].group,
-      defaultInfo: users[index].defaultInfo,
-    });
+    res.json(normalizeUserPayload(users[index]));
+  });
+
+  app.put("/api/users/:id/orderInfos", (req, res) => {
+    const { id } = req.params;
+    const { orderInfos, defaultInfoId } = req.body;
+
+    const users = readJsonFile<any[]>(USERS_FILE, []);
+    const index = users.findIndex((u: any) => u.id === id);
+
+    if (index === -1) {
+      return res.status(404).json({ error: "用户不存在" });
+    }
+
+    const nextOrderInfos = Array.isArray(orderInfos) ? orderInfos : [];
+    const nextDefaultInfoId =
+      defaultInfoId && nextOrderInfos.some((item: any) => item.id === defaultInfoId)
+        ? defaultInfoId
+        : nextOrderInfos[0]?.id || "";
+
+    users[index] = {
+      ...users[index],
+      orderInfos: nextOrderInfos,
+      defaultInfoId: nextDefaultInfoId,
+      defaultInfo:
+        nextOrderInfos.find((item: any) => item.id === nextDefaultInfoId) || {},
+    };
+
+    writeJsonFile(USERS_FILE, users);
+    res.json(normalizeUserPayload(users[index]));
   });
 
   app.put("/api/users/:id/password", (req, res) => {
@@ -477,12 +579,7 @@ async function startServer() {
     users[index].group = "vip";
     writeJsonFile(USERS_FILE, users);
 
-    res.json({
-      id: users[index].id,
-      username: users[index].username,
-      group: users[index].group,
-      defaultInfo: users[index].defaultInfo || {},
-    });
+    res.json(normalizeUserPayload(users[index]));
   });
 
   // --- Discount Management ---
