@@ -1,6 +1,8 @@
 import { apiRequest } from './client';
 import {
+  OrderProgressUpdate,
   OrderStatus,
+  ORDER_STATUS_FLOW,
   ServerOrder,
   normalizeOrderStatus,
 } from '../models/domain';
@@ -50,11 +52,31 @@ export function updateServerOrderStatus(
   );
 }
 
+export function appendServerOrderProgress(
+  orderId: string,
+  payload: {
+    status: OrderStatus;
+    note?: string;
+    imageUrls?: string[];
+  },
+  token: string
+) {
+  return apiRequest<{ success: boolean; order: ServerOrder }>(
+    `/api/orders/${orderId}/progress`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
 function normalizeServerOrder(order: ServerOrder): ServerOrder {
   return {
     ...order,
     imageUrl: normalizeOrderImagePath(order.imageUrl),
     imageUrls: (order.imageUrls || []).map(normalizeOrderImagePath).filter(Boolean) as string[],
+    progressUpdates: normalizeProgressUpdates(order.progressUpdates),
     status: normalizeOrderStatus(order.status),
   };
 }
@@ -65,4 +87,18 @@ function normalizeOrderImagePath(imageUrl?: string) {
     return imageUrl;
   }
   return `/${imageUrl.replace(/^\/+/, '')}`;
+}
+
+function normalizeProgressUpdates(progressUpdates?: OrderProgressUpdate[]) {
+  if (!Array.isArray(progressUpdates)) return [];
+
+  return progressUpdates
+    .map((update) => ({
+      ...update,
+      status: normalizeOrderStatus(update.status),
+      imageUrls: (update.imageUrls || [])
+        .map(normalizeOrderImagePath)
+        .filter(Boolean) as string[],
+    }))
+    .filter((update) => ORDER_STATUS_FLOW.includes(update.status) || update.status === 'cancelled');
 }

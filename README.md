@@ -24,7 +24,7 @@
 - 用户密码与管理员密码目前以明文形式保存在本地 JSON 文件中，仅适合开发或演示环境
 
 ## 技术栈
-
+## 力
 - 前端：React 19、Ionic React、React Router 5、Vite、TypeScript
 - 后端：Express、TSX
 - 样式：自定义 CSS

@@ -7,6 +7,7 @@ import {
 import { arrowForwardOutline, sparklesOutline } from 'ionicons/icons';
 import { useEffect, useState } from 'react';
 import { useHistory } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { fetchDiscounts } from '../api/catalog';
 import BrandMark from '../components/common/BrandMark';
 import CardSkeleton from '../components/common/CardSkeleton';
@@ -60,42 +61,76 @@ export default function IntroPage() {
     <IonPage>
       <IonContent fullscreen>
         <div className="device-shell">
-          <section className="hero-card surface-card">
+          <motion.section 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+            className="hero-card surface-card"
+          >
             <div className="soft-badge">
               <IonIcon icon={sparklesOutline} />
-              新客可先看活动再决定
+              AI 视觉识别，专业洗护
             </div>
             <BrandMark size={58} withWordmark subtitle="SNEAKER CARE STUDIO" />
-            <h1>{brandConfig.introTitle}</h1>
-            <p>{brandConfig.introBody}</p>
+            <motion.h1
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+            >
+              {brandConfig.introTitle}
+            </motion.h1>
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4 }}
+            >
+              {brandConfig.introBody}
+            </motion.p>
 
             <div className="feature-list">
-              {brandConfig.introFeatures.map((feature) => (
-                <div className="feature-item" key={feature.title}>
+              {brandConfig.introFeatures.map((feature, i) => (
+                <motion.div 
+                  className="feature-item" 
+                  key={feature.title}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.5 + i * 0.1 }}
+                >
                   <h3>{feature.title}</h3>
                   <p>{feature.body}</p>
-                </div>
+                </motion.div>
               ))}
             </div>
 
-            <div className="hero-actions">
+            <motion.div 
+              className="hero-actions"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.8 }}
+            >
               <LoadingButton expand="block" loading={entering} onClick={handleEnter} shape="round">
-                进入应用
+                开始体验
                 <IonIcon icon={arrowForwardOutline} slot="end" />
               </LoadingButton>
-            </div>
-          </section>
+            </motion.div>
+          </motion.section>
 
-          <section className="banner-frame" style={{ marginTop: '18px' }}>
+          <motion.section 
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            className="banner-frame" 
+            style={{ marginTop: '18px' }}
+          >
             <img alt="服务保障" src={campaignAssets.assurance} />
             <div className="banner-copy">
               <div className="soft-badge">服务保障</div>
-              <h2 style={{ marginBottom: 6 }}>先看价格拆分，再决定是否安排取件</h2>
+              <h2 style={{ marginBottom: 6 }}>透明价格，专业洗护</h2>
               <p style={{ color: 'rgba(255, 253, 248, 0.84)' }}>
-                鞋款识别、门店选择和订单进度都会沿着同一条路径往下走，手机上也更顺手。
+                基于 AI 的视觉识别技术，为您提供最精准的鞋况分析与清洗建议。
               </p>
             </div>
-          </section>
+          </motion.section>
 
           <section style={{ marginTop: '18px' }} className="stack-section">
             <div className="page-header" style={{ marginBottom: 0 }}>
@@ -127,9 +162,9 @@ export default function IntroPage() {
                     <CompactPromoTile
                       badge="可直接使用"
                       body={discount.description || '进入下单页后可直接选择。'}
-                      imageUrl={resolveDiscountImage(discount, campaignAssets.membership)}
+                      imageUrl={resolveDiscountImage(discount, campaignAssets.assurance)}
                       key={discount.id}
-                      meta={discount.applicableGroup === 'vip' ? '会员专享' : '所有可用用户'}
+                      meta="所有用户可用"
                       title={discount.title}
                     />
                   ))}

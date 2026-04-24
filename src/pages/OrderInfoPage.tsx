@@ -51,21 +51,26 @@ export default function OrderInfoPage() {
         }
 
         const storedUser = getStoredUser();
-        if (!storedUser?.id) {
-          history.replace('/app/account?returnTo=%2Fapp%2Forder%2Finfo');
-          return;
-        }
+        let profile: UserProfile | null = null;
+        let nextShops: Shop[] = [];
 
-        const [profile, nextShops] = await Promise.all([
-          fetchUserProfile(storedUser.id).then(migrateUserProfileOrderInfos),
-          fetchShops(),
-        ]);
+        if (storedUser?.id) {
+          const [p, shops] = await Promise.all([
+            fetchUserProfile(storedUser.id).then(migrateUserProfileOrderInfos),
+            fetchShops(),
+          ]);
+          profile = p;
+          nextShops = shops;
+        } else {
+          nextShops = await fetchShops();
+        }
 
         if (!mounted) return;
 
-        const selectedOrderInfo =
-          getSelectedOrderInfo(profile, nextSnapshot.selectedOrderInfoId) ||
-          getDefaultOrderInfo(profile);
+        const selectedOrderInfo = profile
+          ? getSelectedOrderInfo(profile, nextSnapshot.selectedOrderInfoId) ||
+            getDefaultOrderInfo(profile)
+          : null;
 
         setSnapshot(nextSnapshot);
         setCurrentUser(profile);
@@ -232,7 +237,7 @@ export default function OrderInfoPage() {
                     订单信息
                   </div>
                   <p className="muted" style={{ margin: '8px 0 0' }}>
-                    这里单独负责切换、新增和编辑订单资料。改动地址、门店或取件时间后，需要重新生成推荐方案。
+                    这里单独负责切换、新增和编辑订单资料。改动地址后，需要重新生成推荐方案。
                   </p>
                 </div>
               </div>
@@ -245,7 +250,6 @@ export default function OrderInfoPage() {
                 saveButtonLabel="保存并应用"
                 saving={saving}
                 selectedOrderInfoId={selectedOrderInfoId}
-                shops={shops}
                 subtitle="当前订单会使用这里选中的资料。"
                 title="订单资料"
               />
@@ -264,7 +268,7 @@ export default function OrderInfoPage() {
               {needsReprice ? (
                 <div className="payment-warning">
                   <strong>订单信息已变化</strong>
-                  <p>当前资料会影响距离或排期，请先返回结果页重新生成推荐方案。</p>
+                  <p>当前资料会影响距离或服务范围，请先返回结果页重新生成推荐方案。</p>
                 </div>
               ) : null}
               {error ? <p className="form-message">{error}</p> : null}

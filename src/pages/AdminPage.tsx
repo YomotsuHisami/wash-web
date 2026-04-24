@@ -7,6 +7,7 @@ import {
   IonInput,
   IonItem,
   IonLabel,
+  IonModal,
   IonPage,
   IonSegment,
   IonSegmentButton,
@@ -17,7 +18,9 @@ import {
 } from '@ionic/react';
 import {
   addOutline,
+  closeOutline,
   createOutline,
+  eyeOutline,
   lockClosedOutline,
   logOutOutline,
   trashOutline,
@@ -28,8 +31,8 @@ import { fetchAdminStatus, loginAdmin, setupAdminPassword, verifyAdminToken } fr
 import { fetchDiscounts, fetchShops } from '../api/catalog';
 import {
   deleteServerOrder,
+  appendServerOrderProgress,
   fetchAdminOrders,
-  updateServerOrderStatus,
 } from '../api/orders';
 import { apiRequest } from '../api/client';
 import AdminFormModal from '../components/admin/AdminFormModal';
@@ -40,6 +43,8 @@ import StatusBadge from '../components/common/StatusBadge';
 import {
   Discount,
   OrderStatus,
+  ORDER_STATUS_FLOW,
+  ORDER_STATUS_LABELS,
   ServerOrder,
   Shop,
   normalizeOrderStatus,
@@ -63,6 +68,7 @@ const emptyDiscount: Partial<Discount> = {
   applicableGroup: 'all',
   mode: 'normal',
 };
+const PROGRESS_STATUS_OPTIONS = ORDER_STATUS_FLOW.filter((status) => status !== 'pending_payment');
 
 export default function AdminPage() {
   const history = useHistory();
@@ -87,6 +93,21 @@ export default function AdminPage() {
   const [discountDraft, setDiscountDraft] = useState<Partial<Discount>>(emptyDiscount);
   const [shopSaving, setShopSaving] = useState(false);
   const [discountSaving, setDiscountSaving] = useState(false);
+  const [previewImages, setPreviewImages] = useState<string[]>([]);
+  const [progressModalOpen, setProgressModalOpen] = useState(false);
+  const [progressSaving, setProgressSaving] = useState(false);
+  const [progressError, setProgressError] = useState('');
+  const [progressDraft, setProgressDraft] = useState<{
+    orderId: string;
+    status: OrderStatus;
+    note: string;
+    imageUrls: string[];
+  }>({
+    orderId: '',
+    status: 'paid',
+    note: '',
+    imageUrls: [],
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -192,17 +213,6 @@ export default function AdminPage() {
     setIsAuthenticated(false);
   };
 
-  const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus) => {
-    if (!token) return;
-    setMutatingOrderId(orderId);
-    try {
-      await updateServerOrderStatus(orderId, status, token);
-      await refreshOrders();
-    } finally {
-      setMutatingOrderId('');
-    }
-  };
-
   const handleDeleteOrder = async (orderId: string) => {
     if (!token) return;
     setMutatingOrderId(orderId);
@@ -292,6 +302,78 @@ export default function AdminPage() {
     }
   };
 
+  const openPreview = (images: string[]) => {
+    if (images.length === 0) return;
+    setPreviewImages(images);
+  };
+
+  const closePreview = () => setPreviewImages([]);
+
+  const getOrderImages = (order: ServerOrder) =>
+    [...(order.imageUrls || []), order.imageUrl]
+      .filter((value, index, list): value is string => typeof value === 'string' && list.indexOf(value) === index);
+
+  const openProgressModal = (order: ServerOrder) => {
+    setProgressError('');
+    setProgressDraft({
+      orderId: order.id,
+      status: normalizeOrderStatus(order.status),
+      note: '',
+      imageUrls: [],
+    });
+    setProgressModalOpen(true);
+  };
+
+  const handleProgressImages = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setProgressError('');
+    try {
+      const nextImages = await Promise.all(
+        Array.from(files)
+          .slice(0, 4)
+          .map((file) => compressImageToDataUrl(file))
+      );
+
+      setProgressDraft((prev) => ({
+        ...prev,
+        imageUrls: [...prev.imageUrls, ...nextImages].slice(0, 4),
+      }));
+    } catch (error) {
+      setProgressError(error instanceof Error ? error.message : '阶段图片处理失败。');
+    }
+  };
+
+  const saveOrderProgress = async () => {
+    if (!token || !progressDraft.orderId) return;
+    setProgressError('');
+    setProgressSaving(true);
+    setMutatingOrderId(progressDraft.orderId);
+    try {
+      await appendServerOrderProgress(
+        progressDraft.orderId,
+        {
+          status: progressDraft.status,
+          note: progressDraft.note,
+          imageUrls: progressDraft.imageUrls,
+        },
+        token
+      );
+      setProgressModalOpen(false);
+      setProgressDraft({
+        orderId: '',
+        status: 'paid',
+        note: '',
+        imageUrls: [],
+      });
+      await refreshOrders();
+    } catch (error) {
+      setProgressError(error instanceof Error ? error.message : '保存进度失败，请稍后再试。');
+    } finally {
+      setProgressSaving(false);
+      setMutatingOrderId('');
+    }
+  };
+
   return (
     <IonPage>
       <IonContent fullscreen>
@@ -360,48 +442,56 @@ export default function AdminPage() {
                 ordersLoading ? (
                   <CardSkeleton repeat={2} lines={5} />
                 ) : (
-                  <div className="stack-section">
+                  <div className="stack-section compact-order-list">
                     {orders.map((order) => (
-                      <IonCard className="surface-card" key={order.id}>
-                        <IonCardContent className="stack-section">
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                            <div>
-                              <h3 style={{ margin: 0 }}>{order.userName || order.customerInfo?.name || '未命名用户'}</h3>
-                              <p className="muted">
-                                订单号 {order.id}
-                                <br />
-                                {new Date(order.createdAt).toLocaleString('zh-CN')}
+                      <IonCard className="surface-card compact-order-card compact-order-card--admin" key={order.id}>
+                        <IonCardContent className="compact-order-card__content">
+                          <div className="compact-order-card__top">
+                            <div className="compact-order-card__main">
+                              <div className="compact-order-card__title-row">
+                                <h3>{order.userName || order.customerInfo?.name || '未命名用户'}</h3>
+                                <StatusBadge status={normalizeOrderStatus(order.status)} />
+                              </div>
+                              <p className="compact-order-card__meta">
+                                订单号 {order.id} · {new Date(order.createdAt).toLocaleString('zh-CN')}
                               </p>
                             </div>
-                            <StatusBadge status={normalizeOrderStatus(order.status)} />
                           </div>
-                          {order.imageUrl ? (
-                            <div className="preview-frame">
-                              <img alt="订单鞋图" src={order.imageUrl} />
+                          <div className="compact-order-card__grid">
+                            <div>
+                              <strong>鞋款信息</strong>
+                              <p className="compact-order-card__text">
+                                {(order.analysisResult || order.shoeData)?.brand} {(order.analysisResult || order.shoeData)?.model}
+                              </p>
+                              <p className="compact-order-card__text compact-order-card__text--single">
+                                {(order.userAddress || order.customerInfo?.address) ?? ''}
+                              </p>
                             </div>
-                          ) : null}
-                          <p className="muted">
-                            {(order.analysisResult || order.shoeData)?.brand} {(order.analysisResult || order.shoeData)?.model}
-                            <br />
-                            ¥{order.price || order.totalPrice}
-                            <br />
-                            {(order.userAddress || order.customerInfo?.address) ?? ''}
-                          </p>
-                          <IonItem className="field-item">
-                            <IonLabel position="stacked">更新状态</IonLabel>
-                            <IonSelect
-                              value={normalizeOrderStatus(order.status)}
-                              onIonChange={(event) =>
-                                handleUpdateOrderStatus(order.id, event.detail.value as OrderStatus)
-                              }
+                            <div>
+                              <strong>订单金额</strong>
+                              <p className="compact-order-card__text">¥{order.price || order.totalPrice}</p>
+                            </div>
+                          </div>
+                          {getOrderImages(order).length > 0 ? (
+                            <IonButton
+                              className="compact-order-card__preview-btn"
+                              fill="outline"
+                              shape="round"
+                              onClick={() => openPreview(getOrderImages(order))}
                             >
-                              <IonSelectOption value="pending_payment">待支付</IonSelectOption>
-                              <IonSelectOption value="paid">已支付</IonSelectOption>
-                              <IonSelectOption value="processing">洗护中</IonSelectOption>
-                              <IonSelectOption value="completed">已完成</IonSelectOption>
-                              <IonSelectOption value="cancelled">已取消</IonSelectOption>
-                            </IonSelect>
-                          </IonItem>
+                              <IonIcon icon={eyeOutline} slot="start" />
+                              预览图片
+                            </IonButton>
+                          ) : null}
+                          <IonButton
+                            className="compact-order-card__preview-btn"
+                            fill="outline"
+                            shape="round"
+                            onClick={() => openProgressModal(order)}
+                          >
+                            <IonIcon icon={createOutline} slot="start" />
+                            更新进度
+                          </IonButton>
                           <LoadingButton
                             color="danger"
                             expand="block"
@@ -539,6 +629,72 @@ export default function AdminPage() {
         </div>
 
         <AdminFormModal
+          isOpen={progressModalOpen}
+          onDismiss={() => setProgressModalOpen(false)}
+          title="更新订单进度"
+        >
+          <div className="modal-form">
+            <IonItem className="field-item">
+              <IonLabel position="stacked">阶段状态</IonLabel>
+              <IonSelect
+                value={progressDraft.status}
+                onIonChange={(event) =>
+                  setProgressDraft((prev) => ({
+                    ...prev,
+                    status: event.detail.value as OrderStatus,
+                  }))
+                }
+              >
+                {PROGRESS_STATUS_OPTIONS.map((status) => (
+                  <IonSelectOption key={status} value={status}>
+                    {ORDER_STATUS_LABELS[status]}
+                  </IonSelectOption>
+                ))}
+              </IonSelect>
+            </IonItem>
+            <IonItem className="field-item">
+              <IonLabel position="stacked">阶段说明</IonLabel>
+              <IonTextarea
+                autoGrow
+                value={progressDraft.note}
+                onIonInput={(event) =>
+                  setProgressDraft((prev) => ({
+                    ...prev,
+                    note: event.detail.value || '',
+                  }))
+                }
+              />
+            </IonItem>
+            <IonItem className="field-item">
+              <IonLabel position="stacked">上传阶段图片</IonLabel>
+              <input
+                accept="image/*"
+                multiple
+                onChange={(event) => handleProgressImages(event.target.files)}
+                type="file"
+              />
+            </IonItem>
+            {progressError ? (
+              <IonText color="danger">
+                <p className="form-message">{progressError}</p>
+              </IonText>
+            ) : null}
+            {progressDraft.imageUrls.length > 0 ? (
+              <div className="admin-progress-preview-grid">
+                {progressDraft.imageUrls.map((image, index) => (
+                  <div className="admin-progress-preview-frame" key={`${image}-${index}`}>
+                    <img alt={`阶段图片 ${index + 1}`} src={image} />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <LoadingButton expand="block" loading={progressSaving} onClick={saveOrderProgress} shape="round">
+              保存进度
+            </LoadingButton>
+          </div>
+        </AdminFormModal>
+
+        <AdminFormModal
           isOpen={shopModalOpen}
           onDismiss={() => setShopModalOpen(false)}
           title={shopDraft.id ? '编辑店铺' : '新增店铺'}
@@ -628,7 +784,6 @@ export default function AdminPage() {
               >
                 <IonSelectOption value="all">所有用户</IonSelectOption>
                 <IonSelectOption value="normal">普通用户</IonSelectOption>
-                <IonSelectOption value="vip">会员用户</IonSelectOption>
               </IonSelect>
             </IonItem>
             <IonItem className="field-item">
@@ -648,7 +803,64 @@ export default function AdminPage() {
             </LoadingButton>
           </div>
         </AdminFormModal>
+
+        <IonModal isOpen={previewImages.length > 0} onDidDismiss={closePreview}>
+          <IonContent className="modal-content">
+            <div className="device-shell">
+              <div className="image-preview-modal__top">
+                <div>
+                  <p className="page-eyebrow">ORDER IMAGES</p>
+                  <h2 style={{ margin: 0 }}>订单图片预览</h2>
+                </div>
+                <IonButton fill="clear" onClick={closePreview}>
+                  <IonIcon icon={closeOutline} slot="icon-only" />
+                </IonButton>
+              </div>
+              <div className="image-preview-modal__grid">
+                {previewImages.map((image, index) => (
+                  <div className="image-preview-modal__frame" key={`${image}-${index}`}>
+                    <img alt={`订单图片 ${index + 1}`} src={image} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </IonContent>
+        </IonModal>
       </IonContent>
     </IonPage>
   );
+}
+
+function compressImageToDataUrl(file: File, options: { maxWidth?: number; maxHeight?: number; quality?: number } = {}) {
+  const { maxWidth = 1600, maxHeight = 1600, quality = 0.76 } = options;
+
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读取阶段图片失败'));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error('加载阶段图片失败'));
+      image.onload = () => {
+        let { width, height } = image;
+        const scale = Math.min(maxWidth / width, maxHeight / height, 1);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d');
+
+        if (!context) {
+          reject(new Error('无法处理阶段图片'));
+          return;
+        }
+
+        context.drawImage(image, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      image.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  });
 }

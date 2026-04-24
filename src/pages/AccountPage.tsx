@@ -14,14 +14,14 @@ import {
   IonTextarea,
 } from '@ionic/react';
 import {
+  chevronDownOutline,
+  chevronUpOutline,
   lockClosedOutline,
   logOutOutline,
-  personCircleOutline,
-  sparklesOutline,
+  shieldCheckmarkOutline,
 } from 'ionicons/icons';
 import { useEffect, useMemo, useState } from 'react';
 import { useHistory, useLocation } from 'react-router-dom';
-import { fetchDiscounts, fetchShops } from '../api/catalog';
 import {
   fetchUserProfile,
   loginUser,
@@ -33,12 +33,9 @@ import OrderInfoManager from '../components/account/OrderInfoManager';
 import AuthPanel from '../components/account/AuthPanel';
 import AppLoadingOverlay from '../components/common/AppLoadingOverlay';
 import CardSkeleton from '../components/common/CardSkeleton';
-import CompactPromoTile from '../components/common/CompactPromoTile';
 import LoadingButton from '../components/common/LoadingButton';
 import PageHeader from '../components/common/PageHeader';
-import { brandConfig } from '../config/brand';
-import { campaignAssets, resolveDiscountImage } from '../config/campaigns';
-import { Discount, SavedOrderInfo, Shop, UserProfile, isDiscountActive } from '../models/domain';
+import { SavedOrderInfo, UserProfile } from '../models/domain';
 import { clearStoredUser, getStoredUser, setStoredUser } from '../utils/storage';
 import {
   getDefaultOrderInfo,
@@ -57,8 +54,6 @@ export default function AccountPage() {
   }, [location.search]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [shops, setShops] = useState<Shop[]>([]);
-  const [discounts, setDiscounts] = useState<Discount[]>([]);
   const [selectedOrderInfoId, setSelectedOrderInfoId] = useState<string>('');
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
@@ -69,6 +64,8 @@ export default function AccountPage() {
   const [authLoading, setAuthLoading] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileMessage, setProfileMessage] = useState('');
+  const [showWorkbenchPanel, setShowWorkbenchPanel] = useState(true);
+  const [showSecurityPanel, setShowSecurityPanel] = useState(false);
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
@@ -87,7 +84,6 @@ export default function AccountPage() {
     const load = async () => {
       try {
         const storedUser = getStoredUser();
-        const [nextShops, nextDiscounts] = await Promise.all([fetchShops(), fetchDiscounts()]);
         let profile: UserProfile | null = null;
 
         if (storedUser?.id) {
@@ -104,8 +100,6 @@ export default function AccountPage() {
           setSelectedOrderInfoId(
             getDefaultOrderInfo(profile)?.id || getOrderInfos(profile)[0]?.id || ''
           );
-          setShops(nextShops);
-          setDiscounts(nextDiscounts.filter(isDiscountActive));
         }
       } finally {
         if (mounted) {
@@ -265,9 +259,12 @@ export default function AccountPage() {
     }
   };
 
-  const vipPromo =
-    discounts.find((discount) => discount.applicableGroup === 'vip') || null;
   const orderInfos = getOrderInfos(currentUser);
+  const defaultOrderInfo = getDefaultOrderInfo(currentUser);
+  const securityNotes = [
+    '建议把密码和常用购物账号区分开，降低撞库风险。',
+    '资料保存后，下单流程会直接读取默认资料，减少重复输入。',
+  ];
 
   return (
     <IonPage>
@@ -290,18 +287,20 @@ export default function AccountPage() {
           {loading ? (
             <CardSkeleton repeat={2} lines={4} />
           ) : !currentUser ? (
-            <section className="stack-section">
-              <IonCard className="surface-card hero-card">
+            <section className="stack-section account-page account-page--guest">
+              <IonCard className="surface-card account-auth-card">
                 <IonCardContent className="stack-section">
-                  <div className="soft-badge">
-                    <IonIcon icon={personCircleOutline} />
-                    登录后可保存默认资料和会员状态
+                  <div className="account-auth-card__intro">
+                    <div>
+                      <p className="page-eyebrow">ACCOUNT ACCESS</p>
+                      <h3>登录后保存资料、切换场景、直接回填</h3>
+                    </div>
+                    <div className="account-auth-card__chips">
+                      <span>多地址</span>
+                      <span>多门店</span>
+                      <span>默认回填</span>
+                    </div>
                   </div>
-                  {returnTo ? (
-                    <p className="muted" style={{ margin: 0 }}>
-                      继续下单前，需要先登录账号并补全默认订单资料。
-                    </p>
-                  ) : null}
                   <AuthPanel
                     confirmPassword={confirmPassword}
                     error={authError}
@@ -318,44 +317,40 @@ export default function AccountPage() {
                   />
                 </IonCardContent>
               </IonCard>
-
-              <CompactPromoTile
-                badge="MEMBER"
-                body="登录后可以保存资料，也能直接开通会员并使用会员折扣。"
-                imageUrl={resolveDiscountImage(vipPromo, campaignAssets.membership)}
-                meta="资料和权益会跟着账号保留"
-                onClick={() => history.push('/membership')}
-                title={brandConfig.membershipName}
-              />
             </section>
           ) : (
-            <section className="stack-section">
-              <IonCard className="surface-card hero-card">
+            <section className="stack-section account-page">
+              <IonCard className="surface-card hero-card account-hero-card">
                 <IonCardContent className="stack-section">
-                  <div className="soft-badge">
-                    <IonIcon icon={sparklesOutline} />
-                    当前身份：{currentUser.group === 'vip' ? '会员' : '普通用户'}
-                  </div>
-                  <h2 style={{ margin: 0 }}>{currentUser.username}</h2>
-                  <p>
-                    常用地址、电话和门店都可以保存在这里，下次下单会直接带出。
-                    {returnTo ? ' 当前下单流程会直接读取这里的默认资料。' : ''}
-                  </p>
-                  <div className="inline-actions">
-                    <IonButton shape="round" onClick={() => history.push('/membership')}>
-                      {currentUser.group === 'vip' ? '查看会员权益' : '立即开通会员'}
-                    </IonButton>
+                  <div className="account-profile-head">
+                    <div className="account-profile-avatar" aria-hidden="true">
+                      {currentUser.username.slice(0, 1).toUpperCase()}
+                    </div>
+                    <div className="account-profile-intro">
+                      <h2 style={{ margin: 0 }}>{currentUser.username}</h2>
+                      <p className="account-profile-intro__meta">
+                        {defaultOrderInfo?.label || '还没有默认资料'}
+                        {returnTo ? ' · 当前下单会读取默认资料' : ''}
+                      </p>
+                    </div>
                   </div>
                 </IonCardContent>
               </IonCard>
 
-              <IonCard className="surface-card">
-                <IonCardContent>
-                  <div className="stack-section">
-                    <div>
-                      <p className="page-eyebrow">ORDER INFOS</p>
-                      <h3 style={{ marginTop: 0 }}>订单资料管理</h3>
-                    </div>
+              <section className="result-panel result-panel--disclosure account-disclosure-panel account-workbench-card">
+                <button
+                  className="result-inline-toggle"
+                  onClick={() => setShowWorkbenchPanel((prev) => !prev)}
+                  type="button"
+                >
+                  <span>资料工作台</span>
+                  <div className="account-disclosure-inline-meta">
+                    <span>{orderInfos.length} 份资料</span>
+                    <IonIcon icon={showWorkbenchPanel ? chevronUpOutline : chevronDownOutline} />
+                  </div>
+                </button>
+                {showWorkbenchPanel ? (
+                  <div className="result-disclosure-body account-disclosure-body">
                     <OrderInfoManager
                       defaultInfoId={currentUser?.defaultInfoId}
                       onSave={handleOrderInfoSave}
@@ -365,71 +360,84 @@ export default function AccountPage() {
                       saveButtonLabel="保存资料"
                       saving={profileLoading}
                       selectedOrderInfoId={selectedOrderInfoId}
-                      shops={shops}
-                      subtitle="保存多份常用资料，支付时可以直接切换。"
+                      subtitle=""
                       title="订单资料"
                     />
                     {profileMessage ? <p className="form-message">{profileMessage}</p> : null}
                   </div>
-                </IonCardContent>
-              </IonCard>
+                ) : null}
+              </section>
 
-              <IonCard className="surface-card">
-                <IonCardContent>
-                  <form className="stack-section" onSubmit={handlePasswordSave}>
-                    <div>
-                      <p className="page-eyebrow">PASSWORD</p>
-                      <h3 style={{ marginTop: 0 }}>修改密码</h3>
-                    </div>
-                    <IonItem className="field-item">
-                      <IonLabel position="stacked">原密码</IonLabel>
-                      <IonInput
-                        type="password"
-                        value={oldPassword}
-                        onIonInput={(e) => setOldPassword(e.detail.value || '')}
-                      />
-                    </IonItem>
-                    <IonItem className="field-item">
-                      <IonLabel position="stacked">新密码</IonLabel>
-                      <IonInput
-                        type="password"
-                        value={newPassword}
-                        onIonInput={(e) => setNewPassword(e.detail.value || '')}
-                      />
-                    </IonItem>
-                    <IonItem className="field-item">
-                      <IonLabel position="stacked">确认新密码</IonLabel>
-                      <IonInput
-                        type="password"
-                        value={passwordConfirm}
-                        onIonInput={(e) => setPasswordConfirm(e.detail.value || '')}
-                      />
-                    </IonItem>
-                    {passwordMessage ? (
-                      <IonText color={passwordMessage.includes('成功') ? 'success' : 'danger'}>
-                        <p className="form-message">{passwordMessage}</p>
-                      </IonText>
-                    ) : null}
-                    <LoadingButton expand="block" loading={passwordLoading} shape="round" type="submit">
-                      <IonIcon icon={lockClosedOutline} slot="start" />
-                      保存新密码
-                    </LoadingButton>
-                  </form>
-                </IonCardContent>
-              </IonCard>
-
-              <CompactPromoTile
-                badge={currentUser.group === 'vip' ? 'VIP' : 'MEMBER'}
-                body={
-                  currentUser.group === 'vip'
-                    ? '你当前已是会员，下单时会优先匹配会员可用折扣。'
-                    : '开通后即可使用会员折扣，后续活动也会优先开放给会员。'
-                }
-                imageUrl={resolveDiscountImage(vipPromo, campaignAssets.membership)}
-                meta={currentUser.group === 'vip' ? '当前权益可直接使用' : '开通后立即生效'}
-                onClick={() => history.push('/membership')}
-                title={brandConfig.membershipName}
-              />
+              <section className="result-panel result-panel--disclosure account-disclosure-panel account-security-card">
+                <button
+                  className="result-inline-toggle"
+                  onClick={() => setShowSecurityPanel((prev) => !prev)}
+                  type="button"
+                >
+                  <span>账号安全与密码修改</span>
+                  <div className="account-disclosure-inline-meta">
+                    <span>低频操作</span>
+                    <IonIcon icon={showSecurityPanel ? chevronUpOutline : chevronDownOutline} />
+                  </div>
+                </button>
+                {showSecurityPanel ? (
+                  <div className="result-disclosure-body account-disclosure-body">
+                    <form className="stack-section" onSubmit={handlePasswordSave}>
+                      <div className="account-section-head">
+                        <div>
+                          <p className="page-eyebrow">PASSWORD</p>
+                          <h3 style={{ marginTop: 0 }}>账号安全</h3>
+                        </div>
+                        <div className="account-section-chip">
+                          <IonIcon icon={lockClosedOutline} />
+                          定期更新更安心
+                        </div>
+                      </div>
+                      <div className="account-security-notes">
+                        {securityNotes.map((note) => (
+                          <div className="account-security-note" key={note}>
+                            <IonIcon icon={shieldCheckmarkOutline} />
+                            <p>{note}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <IonItem className="field-item">
+                        <IonLabel position="stacked">原密码</IonLabel>
+                        <IonInput
+                          type="password"
+                          value={oldPassword}
+                          onIonInput={(e) => setOldPassword(e.detail.value || '')}
+                        />
+                      </IonItem>
+                      <IonItem className="field-item">
+                        <IonLabel position="stacked">新密码</IonLabel>
+                        <IonInput
+                          type="password"
+                          value={newPassword}
+                          onIonInput={(e) => setNewPassword(e.detail.value || '')}
+                        />
+                      </IonItem>
+                      <IonItem className="field-item">
+                        <IonLabel position="stacked">确认新密码</IonLabel>
+                        <IonInput
+                          type="password"
+                          value={passwordConfirm}
+                          onIonInput={(e) => setPasswordConfirm(e.detail.value || '')}
+                        />
+                      </IonItem>
+                      {passwordMessage ? (
+                        <IonText color={passwordMessage.includes('成功') ? 'success' : 'danger'}>
+                          <p className="form-message">{passwordMessage}</p>
+                        </IonText>
+                      ) : null}
+                      <LoadingButton expand="block" loading={passwordLoading} shape="round" type="submit">
+                        <IonIcon icon={lockClosedOutline} slot="start" />
+                        保存新密码
+                      </LoadingButton>
+                    </form>
+                  </div>
+                ) : null}
+              </section>
             </section>
           )}
         </div>
