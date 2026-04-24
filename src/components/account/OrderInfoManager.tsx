@@ -3,12 +3,10 @@ import {
   IonInput,
   IonItem,
   IonLabel,
-  IonSelect,
-  IonSelectOption,
   IonTextarea,
 } from '@ionic/react';
 import { useMemo, useState } from 'react';
-import { CustomerInfo, SavedOrderInfo, Shop } from '../../models/domain';
+import { CustomerInfo, SavedOrderInfo } from '../../models/domain';
 import LoadingButton from '../common/LoadingButton';
 import {
   buildOrderInfoLabel,
@@ -22,7 +20,6 @@ interface OrderInfoManagerProps {
   orderInfos: SavedOrderInfo[];
   selectedOrderInfoId?: string | null;
   defaultInfoId?: string | null;
-  shops: Shop[];
   title: string;
   subtitle?: string;
   saveButtonLabel?: string;
@@ -40,7 +37,6 @@ export default function OrderInfoManager({
   orderInfos,
   selectedOrderInfoId,
   defaultInfoId,
-  shops,
   title,
   subtitle,
   saveButtonLabel = '保存资料',
@@ -63,12 +59,7 @@ export default function OrderInfoManager({
   );
 
   const openCreate = () => {
-    const next = createSavedOrderInfo(
-      {
-        preferredShop: selectedOrderInfo?.preferredShop || shops[0]?.name || '',
-      },
-      orderInfos.length + 1
-    );
+    const next = createSavedOrderInfo({}, orderInfos.length + 1);
     setDraft(next);
     setSetAsDefault(orderInfos.length === 0);
     setEditorMode('create');
@@ -181,7 +172,7 @@ export default function OrderInfoManager({
             <span>+</span>
           </div>
           <strong>新增订单资料</strong>
-          <p>为不同地址、时间和门店偏好保存单独资料</p>
+          <p>为不同地址保存单独资料</p>
         </button>
       </div>
 
@@ -229,36 +220,6 @@ export default function OrderInfoManager({
                   setDraft((prev) => ({ ...prev, address: e.detail.value || '' }))
                 }
               />
-            </IonItem>
-            <IonItem className="field-item">
-              <IonLabel position="stacked">常用门店</IonLabel>
-              <IonSelect
-                value={draft.preferredShop || ''}
-                onIonChange={(e) =>
-                  setDraft((prev) => ({ ...prev, preferredShop: e.detail.value || '' }))
-                }
-              >
-                <IonSelectOption value="">不指定</IonSelectOption>
-                {shops.map((shop) => (
-                  <IonSelectOption key={shop.id} value={shop.name}>
-                    {shop.name}
-                  </IonSelectOption>
-                ))}
-              </IonSelect>
-            </IonItem>
-            <IonItem className="field-item">
-              <IonLabel position="stacked">取件时间</IonLabel>
-              <IonSelect
-                value={draft.pickupTime || '尽快'}
-                onIonChange={(e) =>
-                  setDraft((prev) => ({ ...prev, pickupTime: e.detail.value || '尽快' }))
-                }
-              >
-                <IonSelectOption value="尽快">尽快</IonSelectOption>
-                <IonSelectOption value="今天下午">今天下午</IonSelectOption>
-                <IonSelectOption value="明天上午">明天上午</IonSelectOption>
-                <IonSelectOption value="周末">周末</IonSelectOption>
-              </IonSelect>
             </IonItem>
             <IonItem className="field-item order-info-editor__wide">
               <IonLabel position="stacked">备注</IonLabel>

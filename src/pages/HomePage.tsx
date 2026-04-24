@@ -12,6 +12,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { useIonViewWillEnter } from '@ionic/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { fetchDiscounts, fetchShops } from '../api/catalog';
 import BrandMark from '../components/common/BrandMark';
 import CardSkeleton from '../components/common/CardSkeleton';
@@ -77,14 +78,14 @@ export default function HomePage() {
       body:
         discount.description ||
         (index === 0
-          ? '先拍照看鞋况，再决定是否下单。'
-          : '进入下单页后即可直接选择。'),
+          ? '专业 AI 视觉识别，先拍照看鞋况，再决定是否下单。'
+          : '进入下单页后即可直接选择优惠。'),
       imageUrl: resolveDiscountImage(
         discount,
-        index === 0 ? campaignAssets.feature : campaignAssets.membership
+        index === 0 ? campaignAssets.feature : campaignAssets.assurance
       ),
-      route: discount.applicableGroup === 'vip' ? '/membership' : '/app/order',
-      cta: discount.applicableGroup === 'vip' ? '开通会员' : '立即查看',
+      route: '/app/order',
+      cta: '立即体验',
     }));
 
     if (discountSlides.length >= 2) {
@@ -94,26 +95,23 @@ export default function HomePage() {
     return [
       ...discountSlides,
       {
-        id: 'member-slide',
-        title: brandConfig.membershipName,
-        body:
-          currentUser?.group === 'vip'
-            ? '会员权益已生效，下单时会优先匹配会员折扣。'
-            : '开通后可直接使用会员折扣，后续活动也会优先开放。',
-        imageUrl: campaignAssets.membership,
-        route: '/membership',
-        cta: currentUser?.group === 'vip' ? '查看权益' : '立即开通',
+        id: 'assurance-slide',
+        title: '安心洗护保障',
+        body: '全程透明洗护，每一双鞋都由专业技师手工精洗，确保洗护质量。',
+        imageUrl: campaignAssets.assurance,
+        route: '/app/home',
+        cta: '了解详情',
       },
       {
         id: 'first-order-slide',
-        title: '首单拍照估价',
-        body: '先拍三张鞋图，系统会先给出鞋况和费用拆分，再决定要不要继续下单。',
+        title: 'AI 拍照估价',
+        body: '仅需三张照片，系统即刻识别鞋型、材质及污损程度，预估清洗费用。',
         imageUrl: campaignAssets.feature,
         route: '/app/order',
         cta: '开始拍照',
       },
     ].slice(0, 3);
-  }, [discounts, currentUser]);
+  }, [discounts]);
 
   useEffect(() => {
     setActivePromoIndex((prev) => Math.min(prev, Math.max(promoSlides.length - 1, 0)));
@@ -143,54 +141,67 @@ export default function HomePage() {
       <IonContent fullscreen>
         <div className="home-screen">
           <section className="home-hero">
-            <div className="home-hero__inner device-shell device-shell--home">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6 }}
+              className="home-hero__inner device-shell device-shell--home"
+            >
               <div className="home-hero__topline">
                 <BrandMark size={58} withWordmark subtitle="XI SONG" />
-                <div className="home-hero__tagline">{brandConfig.tagline}</div>
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.3 }}
+                  className="home-hero__tagline"
+                >
+                  {brandConfig.tagline}
+                </motion.div>
               </div>
 
               <section className="home-pass-card">
                 <div className="home-pass-card__copy">
                   <h1 className="home-pass-title" aria-label={brandConfig.heroTitle}>
-                    {heroTitleLines.map((line) => (
-                      <span key={line}>{line}</span>
+                    {heroTitleLines.map((line, i) => (
+                      <motion.span 
+                        key={line}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.4 + i * 0.1 }}
+                      >
+                        {line}
+                      </motion.span>
                     ))}
                   </h1>
-                  <p>
+                  <motion.p
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.7 }}
+                  >
                     {currentUser
-                      ? `欢迎回来，${currentUser.username}。看看今天有什么活动吧。`
+                      ? `欢迎回来，${currentUser.username}。今天想为您的爱鞋做一次专业洗护吗？`
                       : brandConfig.heroBody}
-                  </p>
-                  {currentUser?.group === 'vip' ? (
-                    <div className="home-pass-card__meta">
-                      <span>
-                        <IonIcon icon={shieldCheckmarkOutline} />
-                        会员身份已生效
-                      </span>
-                    </div>
-                  ) : null}
-                  <div className="hero-actions">
+                  </motion.p>
+                  
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.8 }}
+                    className="hero-actions"
+                  >
                     <IonButton
                       className="hero-actions__primary"
                       expand="block"
                       shape="round"
                       onClick={() => history.push('/app/order')}
                     >
-                      拍照估价
+                      立即拍照估价
                       <IonIcon icon={arrowForwardOutline} slot="end" />
                     </IonButton>
-                    <IonButton
-                      className="hero-actions__secondary"
-                      fill="outline"
-                      shape="round"
-                      onClick={() => history.push('/membership')}
-                    >
-                      会员权益
-                    </IonButton>
-                  </div>
+                  </motion.div>
                 </div>
               </section>
-            </div>
+            </motion.div>
           </section>
 
           <div className="home-sheet-wrap">
@@ -205,14 +216,23 @@ export default function HomePage() {
                   {loading ? (
                     <CardSkeleton repeat={1} lines={3} />
                   ) : (
-                    <div className="promo-carousel">
+                    <motion.div 
+                      initial={{ opacity: 0 }}
+                      whileInView={{ opacity: 1 }}
+                      viewport={{ once: true }}
+                      className="promo-carousel"
+                    >
                       <div
                         className="promo-carousel__track"
                         onScroll={handlePromoScroll}
                         ref={promoScrollerRef}
                       >
-                        {promoSlides.map((slide) => (
-                          <button
+                        {promoSlides.map((slide, idx) => (
+                          <motion.button
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            whileInView={{ opacity: 1, scale: 1 }}
+                            transition={{ delay: idx * 0.1 }}
+                            viewport={{ once: true }}
                             className="promo-slide"
                             key={slide.id}
                             onClick={() => history.push(slide.route)}
@@ -229,7 +249,7 @@ export default function HomePage() {
                                 <IonIcon icon={chevronForwardOutline} />
                               </span>
                             </div>
-                          </button>
+                          </motion.button>
                         ))}
                       </div>
                       <div className="promo-carousel__dots promo-carousel__dots--overlay">
@@ -243,86 +263,8 @@ export default function HomePage() {
                           />
                         ))}
                       </div>
-                    </div>
+                    </motion.div>
                   )}
-                </div>
-
-                <div className="home-sheet__block">
-                  <div className="home-sheet__heading">
-                    <p className="page-eyebrow">SERVICE STATUS</p>
-                    <h2>服务动态</h2>
-                  </div>
-
-                  <div className="home-stats-row">
-                    <div className="home-stat-tile">
-                      <strong>{discounts.length || 0}</strong>
-                      <span>当前活动</span>
-                    </div>
-                    <div className="home-stat-tile">
-                      <strong>{shops.length || 0}</strong>
-                      <span>合作门店</span>
-                    </div>
-                    <div className="home-stat-tile">
-                      <strong>{latestOrder ? '1' : '0'}</strong>
-                      <span>最近订单</span>
-                    </div>
-                  </div>
-
-                  <div className="latest-order-card">
-                    <div className="latest-order-card__top">
-                      <div>
-                        <h3>{latestOrder ? '最近订单' : '还没有最近订单'}</h3>
-                      </div>
-                      {latestOrder ? <StatusBadge status={latestOrder.status} /> : null}
-                    </div>
-
-                    {latestOrder ? (
-                      <div className="latest-order-card__body">
-                        <div>
-                          <strong>
-                            {latestOrder.shoeData.brand} {latestOrder.shoeData.model}
-                          </strong>
-                          <p className="muted">订单号 {latestOrder.id}</p>
-                          <p className="muted">
-                            取件人 {latestOrder.customerInfo.name} · {latestOrder.customerInfo.phone}
-                          </p>
-                        </div>
-                        <IonButton fill="clear" onClick={() => history.push('/app/orders')}>
-                          查看订单
-                        </IonButton>
-                      </div>
-                    ) : (
-                      <div className="latest-order-card__body">
-                        <div>
-                          <strong>先拍三张鞋图，再生成第一张订单</strong>
-                          <p className="muted">订单生成后，这里会直接显示最近一单的状态和取件信息。</p>
-                        </div>
-                        <IonButton fill="clear" onClick={() => history.push('/app/order')}>
-                          现在拍照
-                        </IonButton>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="home-sheet__block home-sheet__block--assurance">
-                  <div className="home-sheet__heading">
-                    <p className="page-eyebrow">ASSURANCE TECH</p>
-                    <h2>安心保技术</h2>
-                  </div>
-
-                  <button
-                    className="assurance-banner"
-                    onClick={() => history.push('/app/orders')}
-                    type="button"
-                  >
-                    <img alt="安心保" src={campaignAssets.assurance} />
-                    <div className="assurance-banner__overlay" />
-                    <div className="assurance-banner__copy">
-                      <div className="soft-badge">技术能力</div>
-                      <h3>鞋况确认、取件安排、进度查看</h3>
-                    </div>
-                  </button>
                 </div>
               </div>
             </section>

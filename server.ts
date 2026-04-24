@@ -3,6 +3,8 @@ import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { recognizeShoe } from "./src/services/qwen.ts";
+import { applyDefaults, calculateOrderFee } from "./src/services/pricing.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,6 +18,17 @@ const SHOPS_FILE = path.join(DATA_DIR, "shops.json");
 const ADMIN_CONFIG_FILE = path.join(DATA_DIR, "admin_config.json");
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 const DISCOUNTS_FILE = path.join(DATA_DIR, "discounts.json");
+const ORDER_STATUS_FLOW = [
+  "pending_payment",
+  "paid",
+  "pricing_review",
+  "sent_to_shop",
+  "cleaning",
+  "completed_cleaning",
+  "returning",
+  "delivered",
+  "cancelled",
+] as const;
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -146,6 +159,29 @@ function persistImageDataUrl(dataUrl: string, orderId: string, index: number) {
   return `/uploads/orders/${fileName}`;
 }
 
+function dataUrlToBuffer(dataUrl: string) {
+  const parts = extractDataUrlParts(dataUrl);
+  if (!parts) return null;
+
+  return {
+    mimeType: parts.mimeType,
+    buffer: Buffer.from(parts.base64, "base64"),
+  };
+}
+
+function persistImageDataUrlWithPrefix(dataUrl: string, prefix: string, index: number) {
+  ensureUploadsDir();
+  const parts = extractDataUrlParts(dataUrl);
+  if (!parts) {
+    return dataUrl;
+  }
+
+  const fileName = `${sanitizeFileSegment(prefix)}-${index + 1}.${parts.extension}`;
+  const filePath = path.join(ORDER_UPLOADS_DIR, fileName);
+  fs.writeFileSync(filePath, Buffer.from(parts.base64, "base64"));
+  return `/uploads/orders/${fileName}`;
+}
+
 function persistOrderImages<T extends Record<string, any>>(order: T): T {
   const sourceImages = Array.isArray(order.imageUrls) && order.imageUrls.length > 0
     ? order.imageUrls.filter((image: unknown): image is string => typeof image === "string" && !!image)
@@ -168,10 +204,124 @@ function persistOrderImages<T extends Record<string, any>>(order: T): T {
   };
 }
 
+function persistProgressUpdates<T extends Record<string, any>>(order: T): T {
+  if (!Array.isArray(order.progressUpdates) || order.progressUpdates.length === 0) {
+    return order;
+  }
+
+  const progressUpdates = order.progressUpdates.map((update: Record<string, any>, updateIndex: number) => {
+    const images = Array.isArray(update.imageUrls)
+      ? update.imageUrls.filter((image: unknown): image is string => typeof image === "string" && !!image)
+      : [];
+
+    if (images.length === 0) {
+      return update;
+    }
+
+    const persistedImages = images.map((image, imageIndex) =>
+      isDataUrl(image)
+        ? persistImageDataUrlWithPrefix(
+            image,
+            `${order.id || Date.now().toString()}-progress-${update.id || updateIndex + 1}`,
+            imageIndex
+          )
+        : image
+    );
+
+    return {
+      ...update,
+      imageUrls: persistedImages,
+    };
+  });
+
+  return {
+    ...order,
+    progressUpdates,
+  };
+}
+
+function stripLegacyOrderInfoFields<T extends Record<string, any>>(info: T): T {
+  if (!info || typeof info !== "object") {
+    return info;
+  }
+
+  const { preferredShop, pickupTime, ...rest } = info;
+  return rest as T;
+}
+
+function stripLegacyOrderFields<T extends Record<string, any>>(order: T): T {
+  if (!order || typeof order !== "object") {
+    return order;
+  }
+
+  const {
+    preferredShop,
+    pickupTime,
+    customerInfo,
+    ...rest
+  } = order;
+
+  return {
+    ...rest,
+    customerInfo: stripLegacyOrderInfoFields((customerInfo || {}) as Record<string, any>),
+  } as unknown as T;
+}
+
+function stripLegacyUserFields<T extends Record<string, any>>(user: T): T {
+  if (!user || typeof user !== "object") {
+    return user;
+  }
+
+  const nextOrderInfos = Array.isArray(user.orderInfos)
+    ? user.orderInfos.map((item: Record<string, any>) => stripLegacyOrderInfoFields(item))
+    : [];
+
+  return {
+    ...user,
+    orderInfos: nextOrderInfos,
+    defaultInfo: stripLegacyOrderInfoFields((user.defaultInfo || {}) as Record<string, any>),
+  } as T;
+}
+
+function ensureOrderProgress(order: Record<string, any>) {
+  const normalizedStatus =
+    typeof order.status === "string" && ORDER_STATUS_FLOW.includes(order.status as typeof ORDER_STATUS_FLOW[number])
+      ? order.status
+      : "pending_payment";
+
+  const progressUpdates = Array.isArray(order.progressUpdates) ? order.progressUpdates : [];
+  if (progressUpdates.length > 0) {
+    return {
+      ...order,
+      status: normalizedStatus,
+      progressUpdates,
+    };
+  }
+
+  return {
+    ...order,
+    status: normalizedStatus,
+    progressUpdates: [
+      {
+        id: `progress-${Date.now().toString(36)}`,
+        status: normalizedStatus,
+        note: normalizedStatus === "pending_payment" ? "订单已创建，等待用户支付。" : "",
+        createdAt: Number(order.createdAt) || Date.now(),
+        imageUrls: [],
+      },
+    ],
+  };
+}
+
 function removeOrderImages(order: Record<string, any>) {
   const images = [
     ...(Array.isArray(order.imageUrls) ? order.imageUrls : []),
     order.imageUrl,
+    ...(Array.isArray(order.progressUpdates)
+      ? order.progressUpdates.flatMap((update: Record<string, any>) =>
+          Array.isArray(update.imageUrls) ? update.imageUrls : []
+        )
+      : []),
   ].filter((value, index, list): value is string => typeof value === "string" && list.indexOf(value) === index);
 
   for (const imagePath of images) {
@@ -194,11 +344,11 @@ function migrateEmbeddedOrderImages() {
       (Array.isArray(order.imageUrls) && order.imageUrls.some(isDataUrl));
 
     if (!hasEmbeddedImage) {
-      return order;
+      return ensureOrderProgress(order);
     }
 
     changed = true;
-    return persistOrderImages(order);
+    return ensureOrderProgress(persistProgressUpdates(persistOrderImages(order)));
   });
 
   if (changed) {
@@ -208,7 +358,7 @@ function migrateEmbeddedOrderImages() {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = 3002;
 
   // 允许三张 base64 图片的请求体（开发阶段）
   app.use(express.json({ limit: '35mb' }));
@@ -271,12 +421,56 @@ async function startServer() {
 
   // Orders API
   app.get("/api/orders", requireAdmin, (req, res) => {
-    const orders = readJsonFile<any[]>(ORDERS_FILE, []);
+    const orders = readJsonFile<any[]>(ORDERS_FILE, []).map((order) => stripLegacyOrderFields(order));
     res.json(orders);
   });
 
+  app.post("/api/analyze-shoe", async (req, res) => {
+    const images = Array.isArray(req.body?.images)
+      ? req.body.images.filter((item: unknown): item is string => typeof item === "string" && !!item)
+      : [];
+
+    if (images.length === 0) {
+      return res.status(400).json({ error: "请至少上传一张鞋子图片。" });
+    }
+
+    const imagePayload = dataUrlToBuffer(images[0]);
+    if (!imagePayload) {
+      return res.status(400).json({ error: "图片格式无效，请重新上传。" });
+    }
+
+    try {
+      const raw = await recognizeShoe(imagePayload.buffer, imagePayload.mimeType);
+      if (raw.recognitionStatus === "retake") {
+        return res.status(422).json({
+          error: raw.retakeReason || "未识别到清晰鞋子，请重新拍摄。",
+        });
+      }
+
+      const baseData = applyDefaults(raw);
+      const fee = calculateOrderFee(baseData, 5);
+      const result = {
+        ...baseData,
+        estimatedTurnaround: fee.estimatedTurnaround,
+        pricing: {
+          ...baseData.pricing,
+          baseFee: fee.breakdown.baseFee,
+          manualReviewNote: "AI 已完成初步识别，最终价格以到店复核为准。",
+        },
+      };
+
+      return res.json({ success: true, result });
+    } catch (error) {
+      console.error("[ANALYZE SHOE ERROR]", error);
+      const message = error instanceof Error ? error.message : "识别失败，请稍后再试。";
+      return res.status(500).json({ error: message });
+    }
+  });
+
   app.post("/api/orders", (req, res) => {
-    const newOrder = persistOrderImages(req.body);
+    const newOrder = stripLegacyOrderFields(
+      ensureOrderProgress(persistProgressUpdates(persistOrderImages(req.body)))
+    );
     const orders = readJsonFile<any[]>(ORDERS_FILE, []);
     orders.push(newOrder);
     writeJsonFile(ORDERS_FILE, orders);
@@ -305,11 +499,58 @@ async function startServer() {
     
     if (orderIndex !== -1) {
       orders[orderIndex].status = 'paid';
+      orders[orderIndex].progressUpdates = [
+        ...(Array.isArray(orders[orderIndex].progressUpdates) ? orders[orderIndex].progressUpdates : []),
+        {
+          id: `progress-${Date.now().toString(36)}`,
+          status: 'paid',
+          note: '用户已完成支付，订单进入确价前状态。',
+          createdAt: Date.now(),
+          imageUrls: [],
+        },
+      ];
       writeJsonFile(ORDERS_FILE, orders);
       res.json({ success: true, order: orders[orderIndex] });
     } else {
       res.status(404).json({ error: "Order not found" });
     }
+  });
+
+  app.put("/api/orders/:id/progress", requireAdmin, (req, res) => {
+    const { id } = req.params;
+    const { status, note, imageUrls } = req.body;
+    const orders = readJsonFile<any[]>(ORDERS_FILE, []);
+    const orderIndex = orders.findIndex((o: any) => o.id === id);
+
+    if (orderIndex === -1) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const normalizedStatus =
+      typeof status === "string" && ORDER_STATUS_FLOW.includes(status as typeof ORDER_STATUS_FLOW[number])
+        ? status
+        : orders[orderIndex].status;
+
+    const progressUpdate = {
+      id: `progress-${Date.now().toString(36)}`,
+      status: normalizedStatus,
+      note: typeof note === "string" ? note : "",
+      createdAt: Date.now(),
+      imageUrls: Array.isArray(imageUrls) ? imageUrls : [],
+    };
+
+    const nextOrder = persistProgressUpdates({
+      ...orders[orderIndex],
+      status: normalizedStatus,
+      progressUpdates: [
+        ...(Array.isArray(orders[orderIndex].progressUpdates) ? orders[orderIndex].progressUpdates : []),
+        progressUpdate,
+      ],
+    });
+
+    orders[orderIndex] = ensureOrderProgress(nextOrder);
+    writeJsonFile(ORDERS_FILE, orders);
+    return res.json({ success: true, order: orders[orderIndex] });
   });
 
   app.delete("/api/orders/:id", (req, res) => {
@@ -330,7 +571,7 @@ async function startServer() {
     const order = orders.find((o: any) => o.id === id);
     
     if (order) {
-      res.json(order);
+      res.json(stripLegacyOrderFields(order));
     } else {
       res.status(404).json({ error: "Order not found" });
     }
@@ -376,31 +617,32 @@ async function startServer() {
   // --- User Accounts & Membership ---
 
   const normalizeUserPayload = (user: any) => {
+    const sanitizedUser = stripLegacyUserFields(user);
     const legacyDefault =
-      user.defaultInfo && Object.values(user.defaultInfo).some(Boolean)
+      sanitizedUser.defaultInfo && Object.values(sanitizedUser.defaultInfo).some(Boolean)
         ? {
-            id: user.defaultInfoId || "legacy-default-order-info",
+            id: sanitizedUser.defaultInfoId || "legacy-default-order-info",
             label: "默认订单资料",
-            ...user.defaultInfo,
+            ...sanitizedUser.defaultInfo,
           }
         : null;
 
-    const orderInfos = Array.isArray(user.orderInfos)
-      ? user.orderInfos
+    const orderInfos = Array.isArray(sanitizedUser.orderInfos)
+      ? sanitizedUser.orderInfos
       : legacyDefault
       ? [legacyDefault]
       : [];
 
     const defaultInfoId =
-      user.defaultInfoId && orderInfos.some((item: any) => item.id === user.defaultInfoId)
-        ? user.defaultInfoId
+      sanitizedUser.defaultInfoId && orderInfos.some((item: any) => item.id === sanitizedUser.defaultInfoId)
+        ? sanitizedUser.defaultInfoId
         : orderInfos[0]?.id;
 
     const defaultInfo =
       orderInfos.find((item: any) => item.id === defaultInfoId) || orderInfos[0] || {};
 
     return {
-      ...user,
+      ...sanitizedUser,
       orderInfos,
       defaultInfoId,
       defaultInfo,
@@ -481,7 +723,7 @@ async function startServer() {
     const existingIndex = normalizedUser.orderInfos.findIndex(
       (item: any) => item.id === defaultInfoId
     );
-    const nextOrderInfo = {
+    const nextOrderInfo = stripLegacyOrderInfoFields({
       ...(normalizedUser.orderInfos[existingIndex] || {
         id: defaultInfoId,
         label: "默认订单资料",
@@ -492,7 +734,7 @@ async function startServer() {
         defaultInfo.label ||
         normalizedUser.orderInfos[existingIndex]?.label ||
         "默认订单资料",
-    };
+    });
 
     if (existingIndex >= 0) {
       normalizedUser.orderInfos[existingIndex] = nextOrderInfo;
@@ -523,7 +765,9 @@ async function startServer() {
       return res.status(404).json({ error: "用户不存在" });
     }
 
-    const nextOrderInfos = Array.isArray(orderInfos) ? orderInfos : [];
+    const nextOrderInfos = Array.isArray(orderInfos)
+      ? orderInfos.map((item: Record<string, any>) => stripLegacyOrderInfoFields(item))
+      : [];
     const nextDefaultInfoId =
       defaultInfoId && nextOrderInfos.some((item: any) => item.id === defaultInfoId)
         ? defaultInfoId
@@ -564,22 +808,6 @@ async function startServer() {
     writeJsonFile(USERS_FILE, users);
 
     res.json({ success: true });
-  });
-
-  app.post("/api/users/:id/upgrade", (req, res) => {
-    const { id } = req.params;
-
-    const users = readJsonFile<any[]>(USERS_FILE, []);
-    const index = users.findIndex((u: any) => u.id === id);
-
-    if (index === -1) {
-      return res.status(404).json({ error: "用户不存在" });
-    }
-
-    users[index].group = "vip";
-    writeJsonFile(USERS_FILE, users);
-
-    res.json(normalizeUserPayload(users[index]));
   });
 
   // --- Discount Management ---

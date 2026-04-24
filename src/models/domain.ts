@@ -37,8 +37,6 @@ export interface CustomerInfo {
   name: string;
   phone: string;
   address: string;
-  preferredShop: string;
-  pickupTime: string;
   notes: string;
   servicePreference?: ServicePreference;
 }
@@ -51,9 +49,21 @@ export interface SavedOrderInfo extends CustomerInfo {
 export type OrderStatus =
   | 'pending_payment'
   | 'paid'
-  | 'processing'
-  | 'completed'
+  | 'pricing_review'
+  | 'sent_to_shop'
+  | 'cleaning'
+  | 'completed_cleaning'
+  | 'returning'
+  | 'delivered'
   | 'cancelled';
+
+export interface OrderProgressUpdate {
+  id: string;
+  status: OrderStatus;
+  note?: string;
+  createdAt: number;
+  imageUrls?: string[];
+}
 
 export interface PricingBreakdown {
   baseFee: number;
@@ -93,6 +103,7 @@ export interface Order {
   id: string;
   createdAt: number;
   status: OrderStatus;
+  progressUpdates?: OrderProgressUpdate[];
   shoeData: ShoeData;
   customerInfo: CustomerInfo;
   selectedServicePlan?: ServiceRecommendation;
@@ -100,7 +111,7 @@ export interface Order {
   totalPrice: number;
 }
 
-export type UserGroup = 'normal' | 'vip';
+export type UserGroup = 'normal';
 
 export interface Discount {
   id: string;
@@ -140,8 +151,6 @@ export interface ServerOrder extends Order {
   userName?: string;
   userPhone?: string;
   userAddress?: string;
-  preferredShop?: string;
-  pickupTime?: string;
   notes?: string;
   servicePreference?: ServicePreference;
   price?: number;
@@ -151,16 +160,51 @@ export interface ServerOrder extends Order {
   pricingBreakdown?: PricingBreakdown;
 }
 
+export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
+  pending_payment: '待支付',
+  paid: '已支付',
+  pricing_review: '进一步确价',
+  sent_to_shop: '送到洗鞋店',
+  cleaning: '清洗中',
+  completed_cleaning: '清洗完成',
+  returning: '送回中',
+  delivered: '已送达',
+  cancelled: '已取消',
+};
+
+export const ORDER_STATUS_FLOW: OrderStatus[] = [
+  'pending_payment',
+  'paid',
+  'pricing_review',
+  'sent_to_shop',
+  'cleaning',
+  'completed_cleaning',
+  'returning',
+  'delivered',
+];
+
 export function normalizeOrderStatus(status: string): OrderStatus {
   if (status === 'pending') {
     return 'pending_payment';
   }
 
+  if (status === 'processing') {
+    return 'cleaning';
+  }
+
+  if (status === 'completed') {
+    return 'delivered';
+  }
+
   if (
     status === 'pending_payment' ||
     status === 'paid' ||
-    status === 'processing' ||
-    status === 'completed' ||
+    status === 'pricing_review' ||
+    status === 'sent_to_shop' ||
+    status === 'cleaning' ||
+    status === 'completed_cleaning' ||
+    status === 'returning' ||
+    status === 'delivered' ||
     status === 'cancelled'
   ) {
     return status;

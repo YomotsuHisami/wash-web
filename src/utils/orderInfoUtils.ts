@@ -9,8 +9,6 @@ export const emptyCustomerInfo: CustomerInfo = {
   name: '',
   phone: '',
   address: '',
-  preferredShop: '',
-  pickupTime: '尽快',
   notes: '',
   servicePreference: 'balanced',
 };
@@ -28,7 +26,6 @@ export function buildOrderInfoLabel(
   const base =
     orderInfo.name?.trim() ||
     orderInfo.address?.trim() ||
-    orderInfo.preferredShop?.trim() ||
     '';
   return base ? `${base}资料` : `订单资料 ${fallbackIndex}`;
 }
@@ -137,11 +134,7 @@ export function isRepriceSensitiveOrderInfoChange(
   previous?: Partial<CustomerInfo | SavedOrderInfo> | null,
   next?: Partial<CustomerInfo | SavedOrderInfo> | null
 ) {
-  return (
-    (previous?.address || '') !== (next?.address || '') ||
-    (previous?.preferredShop || '') !== (next?.preferredShop || '') ||
-    (previous?.pickupTime || '') !== (next?.pickupTime || '')
-  );
+  return (previous?.address || '') !== (next?.address || '');
 }
 
 export function summarizeOrderInfo(info?: Partial<CustomerInfo | SavedOrderInfo> | null) {

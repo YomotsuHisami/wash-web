@@ -1,5 +1,4 @@
 import {
-  IonButton,
   IonCard,
   IonCardContent,
   IonChip,
@@ -16,14 +15,16 @@ import {
 import { receiptOutline, searchOutline } from 'ionicons/icons';
 import { useState } from 'react';
 import { useIonViewWillEnter } from '@ionic/react';
+import { useHistory } from 'react-router-dom';
 import { fetchOrderById } from '../api/orders';
 import EmptyState from '../components/common/EmptyState';
 import LoadingButton from '../components/common/LoadingButton';
 import PageHeader from '../components/common/PageHeader';
-import StatusBadge from '../components/common/StatusBadge';
 import {
   Order,
+  OrderProgressUpdate,
   OrderStatus,
+  ORDER_STATUS_LABELS,
   ServerOrder,
   normalizeOrderStatus,
 } from '../models/domain';
@@ -33,12 +34,16 @@ const FILTERS: Array<{ label: string; value: 'all' | OrderStatus }> = [
   { label: '全部', value: 'all' },
   { label: '待支付', value: 'pending_payment' },
   { label: '已支付', value: 'paid' },
-  { label: '洗护中', value: 'processing' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'cancelled' },
+  { label: '进一步确价', value: 'pricing_review' },
+  { label: '送到洗鞋店', value: 'sent_to_shop' },
+  { label: '清洗中', value: 'cleaning' },
+  { label: '清洗完成', value: 'completed_cleaning' },
+  { label: '送回中', value: 'returning' },
+  { label: '已送达', value: 'delivered' },
 ];
 
 export default function OrdersPage() {
+  const history = useHistory();
   const [view, setView] = useState<'local' | 'search'>('local');
   const [filter, setFilter] = useState<'all' | OrderStatus>('all');
   const [localOrders, setLocalOrders] = useState<Order[]>([]);
@@ -48,10 +53,40 @@ export default function OrdersPage() {
   const [serverOrder, setServerOrder] = useState<ServerOrder | null>(null);
 
   useIonViewWillEnter(() => {
-    const nextOrders = [...getOrders()]
-      .map((order) => ({ ...order, status: normalizeOrderStatus(order.status) }))
-      .sort((a, b) => b.createdAt - a.createdAt);
-    setLocalOrders(nextOrders);
+    let mounted = true;
+
+    const loadOrders = async () => {
+      const baseOrders = [...getOrders()]
+        .map((order) => ({ ...order, status: normalizeOrderStatus(order.status) }))
+        .sort((a, b) => b.createdAt - a.createdAt);
+
+      const syncedOrders = await Promise.all(
+        baseOrders.map(async (order) => {
+          try {
+            const serverOrder = await fetchOrderById(order.id);
+            return {
+              ...order,
+              status: normalizeOrderStatus(serverOrder.status),
+              progressUpdates: serverOrder.progressUpdates,
+              selectedServicePlan: serverOrder.selectedServicePlan || order.selectedServicePlan,
+              totalPrice: serverOrder.price || serverOrder.totalPrice || order.totalPrice,
+            };
+          } catch {
+            return order;
+          }
+        })
+      );
+
+      if (mounted) {
+        setLocalOrders(syncedOrders);
+      }
+    };
+
+    loadOrders();
+
+    return () => {
+      mounted = false;
+    };
   });
 
   const handleSearch = async () => {
@@ -77,6 +112,19 @@ export default function OrdersPage() {
   const filteredOrders =
     filter === 'all' ? localOrders : localOrders.filter((order) => order.status === filter);
 
+  const getProgressWithImages = (order?: Pick<Order | ServerOrder, 'progressUpdates' | 'status'> | null) => {
+    const updates = Array.isArray(order?.progressUpdates) ? [...order.progressUpdates] : [];
+    const currentStatus = order?.status ? normalizeOrderStatus(order.status) : null;
+    return updates
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .find(
+        (item): item is OrderProgressUpdate =>
+          (!!currentStatus && item.status === currentStatus) &&
+          Array.isArray(item.imageUrls) &&
+          item.imageUrls.length > 0
+      ) || null;
+  };
+
   return (
     <IonPage>
       <IonContent fullscreen>
@@ -84,7 +132,6 @@ export default function OrdersPage() {
           <PageHeader
             eyebrow="ORDERS"
             title="订单中心"
-            subtitle="本机订单和服务器查单都放在这里，查进度不用来回找页面。"
           />
 
           <IonSegment
@@ -122,48 +169,58 @@ export default function OrdersPage() {
                   title="订单还空着"
                 />
               ) : (
-                <div className="stack-section">
-                  {filteredOrders.map((order) => (
-                    <IonCard className="surface-card" key={order.id}>
-                      <IonCardContent className="stack-section">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                          <div>
-                            <p className="page-eyebrow" style={{ marginBottom: 6 }}>
-                              {new Date(order.createdAt).toLocaleString('zh-CN')}
-                            </p>
-                            <h3 style={{ margin: 0 }}>{order.shoeData.brand} {order.shoeData.model}</h3>
-                            <p className="muted">订单号 {order.id}</p>
-                          </div>
-                          <StatusBadge status={order.status} />
+                <div className="stack-section compact-order-list">
+                  {filteredOrders.map((order) => {
+                    const progressWithImages = getProgressWithImages(order);
+
+                    return (
+                    <IonCard
+                      button
+                      className="surface-card compact-order-card compact-order-card--clickable"
+                      key={order.id}
+                      onClick={() => history.push(`/app/orders/${order.id}`)}
+                    >
+                      <IonCardContent className="compact-order-card__content">
+                        <div className="compact-order-card__meta-row">
+                          <span>{new Date(order.createdAt).toLocaleString('zh-CN')}</span>
+                          <span>订单号 {order.id}</span>
                         </div>
-                        <div className="preview-grid">
-                          <div>
-                            <strong>取件信息</strong>
-                            <p className="muted" style={{ marginTop: 6 }}>
-                              {order.customerInfo.name} · {order.customerInfo.phone}
-                              <br />
-                              {order.customerInfo.address}
-                            </p>
+                        <div className="compact-order-card__focus">
+                          <div
+                            className={`compact-order-card__status-action${progressWithImages ? ' is-linkable' : ''}`}
+                            onClick={(event) => {
+                              if (!progressWithImages) return;
+                              event.stopPropagation();
+                              history.push(`/app/orders/${order.id}/progress/${progressWithImages.id}`);
+                            }}
+                            role={progressWithImages ? 'button' : undefined}
+                            tabIndex={progressWithImages ? 0 : undefined}
+                            onKeyDown={(event) => {
+                              if (!progressWithImages) return;
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                history.push(`/app/orders/${order.id}/progress/${progressWithImages.id}`);
+                              }
+                            }}
+                          >
+                            <div className={`status-chip status-chip--${order.status} compact-order-card__status-chip`}>
+                              <span>{ORDER_STATUS_LABELS[order.status]}</span>
+                              {progressWithImages ? <strong>查看图片</strong> : null}
+                            </div>
                           </div>
+                          <h3>{order.shoeData.brand} {order.shoeData.model}</h3>
+                          <strong>¥{order.totalPrice}</strong>
+                        </div>
+                        <div className="compact-order-card__summary">
                           <div>
-                            <strong>金额</strong>
-                            <p className="muted" style={{ marginTop: 6 }}>
-                              预付 ¥{order.totalPrice} · {order.customerInfo.preferredShop || '未指定店铺'}
-                            </p>
+                            <span>{order.selectedServicePlan?.shopName || '系统分配门店'}</span>
+                            <strong>{order.selectedServicePlan?.title || '未选择方案'}</strong>
                           </div>
                         </div>
-                        {order.selectedServicePlan ? (
-                          <div className="feature-item">
-                            <strong>{order.selectedServicePlan.title}</strong>
-                            <p>
-                              {order.selectedServicePlan.shopName} · 预计 {order.selectedServicePlan.estimatedTurnaround}
-                            </p>
-                            <p>最终价格会在平台取鞋后经人工与 AI 复核，多退少补。</p>
-                          </div>
-                        ) : null}
                       </IonCardContent>
                     </IonCard>
-                  ))}
+                  )})}
                 </div>
               )}
             </section>
@@ -192,40 +249,53 @@ export default function OrdersPage() {
               </IonCard>
 
               {serverOrder ? (
-                <IonCard className="surface-card">
-                  <IonCardContent className="stack-section">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                      <div>
-                        <p className="page-eyebrow" style={{ marginBottom: 6 }}>
-                          SERVER ORDER
-                        </p>
-                        <h3 style={{ margin: 0 }}>
-                          {(serverOrder.analysisResult || serverOrder.shoeData)?.brand} {(serverOrder.analysisResult || serverOrder.shoeData)?.model}
-                        </h3>
-                        <p className="muted">订单号 {serverOrder.id}</p>
-                      </div>
-                      <StatusBadge status={normalizeOrderStatus(serverOrder.status)} />
+                <IonCard
+                  button
+                  className="surface-card compact-order-card compact-order-card--server compact-order-card--clickable"
+                  onClick={() => history.push(`/app/orders/${serverOrder.id}`)}
+                >
+                  <IonCardContent className="compact-order-card__content">
+                    <div className="compact-order-card__meta-row">
+                      <span>SERVER ORDER</span>
+                      <span>订单号 {serverOrder.id}</span>
                     </div>
-                    {serverOrder.imageUrl ? (
-                      <div className="preview-frame">
-                        <img alt="订单鞋图" src={serverOrder.imageUrl} />
+                    <div className="compact-order-card__focus">
+                      <div
+                        className={`compact-order-card__status-action${getProgressWithImages(serverOrder) ? ' is-linkable' : ''}`}
+                        onClick={(event) => {
+                          const progressWithImages = getProgressWithImages(serverOrder);
+                          if (!progressWithImages) return;
+                          event.stopPropagation();
+                          history.push(`/app/orders/${serverOrder.id}/progress/${progressWithImages.id}`);
+                        }}
+                        role={getProgressWithImages(serverOrder) ? 'button' : undefined}
+                        tabIndex={getProgressWithImages(serverOrder) ? 0 : undefined}
+                        onKeyDown={(event) => {
+                          const progressWithImages = getProgressWithImages(serverOrder);
+                          if (!progressWithImages) return;
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            history.push(`/app/orders/${serverOrder.id}/progress/${progressWithImages.id}`);
+                          }
+                        }}
+                      >
+                        <div className={`status-chip status-chip--${normalizeOrderStatus(serverOrder.status)} compact-order-card__status-chip`}>
+                          <span>{ORDER_STATUS_LABELS[normalizeOrderStatus(serverOrder.status)]}</span>
+                          {getProgressWithImages(serverOrder) ? <strong>查看图片</strong> : null}
+                        </div>
                       </div>
-                    ) : null}
-                    <p className="muted">
-                      {serverOrder.userName || serverOrder.customerInfo?.name} · {serverOrder.userPhone || serverOrder.customerInfo?.phone}
-                      <br />
-                      {serverOrder.userAddress || serverOrder.customerInfo?.address}
-                    </p>
-                    <strong>预付 ¥{serverOrder.price || serverOrder.totalPrice}</strong>
-                    {serverOrder.selectedServicePlan ? (
-                      <div className="feature-item">
-                        <strong>{serverOrder.selectedServicePlan.title}</strong>
-                        <p>
-                          {serverOrder.selectedServicePlan.shopName} · 预计 {serverOrder.selectedServicePlan.estimatedTurnaround}
-                        </p>
-                        <p>最终价格会在平台取鞋后经人工与 AI 复核，多退少补。</p>
+                      <h3>
+                        {(serverOrder.analysisResult || serverOrder.shoeData)?.brand} {(serverOrder.analysisResult || serverOrder.shoeData)?.model}
+                      </h3>
+                      <strong>¥{serverOrder.price || serverOrder.totalPrice}</strong>
+                    </div>
+                    <div className="compact-order-card__summary">
+                      <div>
+                        <span>{serverOrder.selectedServicePlan?.shopName || '系统分配门店'}</span>
+                        <strong>{serverOrder.selectedServicePlan?.title || '未选择方案'}</strong>
                       </div>
-                    ) : null}
+                    </div>
                   </IonCardContent>
                 </IonCard>
               ) : null}

@@ -47,12 +47,12 @@ export default function OrderPayPage() {
         }
 
         const storedUser = getStoredUser();
-        if (!storedUser?.id) {
-          history.replace('/app/account');
-          return;
+        let profile: UserProfile | null = null;
+        
+        if (storedUser?.id) {
+          profile = await fetchUserProfile(storedUser.id).then(migrateUserProfileOrderInfos);
         }
-
-        const profile = await fetchUserProfile(storedUser.id).then(migrateUserProfileOrderInfos);
+        
         if (!mounted) return;
 
         setSnapshot(nextSnapshot);
@@ -87,7 +87,7 @@ export default function OrderPayPage() {
   };
 
   const handleConfirmPaid = async () => {
-    if (!snapshot || !currentUser || !selectedPlan || !viewModel) return;
+    if (!snapshot || !selectedPlan || !viewModel) return;
 
     const lockedOrderInfo = toCustomerInfo(selectedOrderInfo || snapshot.formData);
     if (!hasRequiredOrderInfo(lockedOrderInfo)) {
@@ -116,8 +116,6 @@ export default function OrderPayPage() {
       userName: lockedOrderInfo.name,
       userPhone: lockedOrderInfo.phone,
       userAddress: lockedOrderInfo.address,
-      preferredShop: lockedOrderInfo.preferredShop,
-      pickupTime: lockedOrderInfo.pickupTime,
       notes: lockedOrderInfo.notes,
       servicePreference: lockedOrderInfo.servicePreference,
       price: viewModel.finalPrice,
@@ -144,7 +142,9 @@ export default function OrderPayPage() {
       saveOrder(order);
       await createServerOrder(serverOrder);
       await markOrderPaid(id);
-      markOrderedOnce(currentUser.id);
+      if (currentUser?.id) {
+        markOrderedOnce(currentUser.id);
+      }
       clearOrderResultSnapshot();
       history.replace('/app/orders');
     } catch (submitError) {

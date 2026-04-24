@@ -15,6 +15,8 @@ import AccountPage from '../pages/AccountPage';
 import OrderResultPage from '../pages/OrderResultPage';
 import OrderInfoPage from '../pages/OrderInfoPage';
 import OrderPayPage from '../pages/OrderPayPage';
+import OrderDetailPage from '../pages/OrderDetailPage';
+import OrderProgressImagesPage from '../pages/OrderProgressImagesPage';
 
 export default function AppTabs() {
   const location = useLocation();
@@ -36,6 +38,8 @@ export default function AppTabs() {
         <Route exact path="/app/order/info" component={OrderInfoPage} />
         <Route exact path="/app/order/pay" component={OrderPayPage} />
         <Route exact path="/app/orders" component={OrdersPage} />
+        <Route exact path="/app/orders/:orderId" component={OrderDetailPage} />
+        <Route exact path="/app/orders/:orderId/progress/:progressId" component={OrderProgressImagesPage} />
         <Route exact path="/app/account" component={AccountPage} />
         <Route exact path="/app" render={() => <Redirect to="/app/home" />} />
       </IonRouterOutlet>

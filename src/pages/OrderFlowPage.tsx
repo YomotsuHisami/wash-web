@@ -27,6 +27,7 @@ import {
 } from 'ionicons/icons';
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useHistory, useLocation } from 'react-router-dom';
+import { analyzeShoeImages } from '../api/analysis';
 import { fetchDiscounts, fetchShops } from '../api/catalog';
 import { createServerOrder, markOrderPaid } from '../api/orders';
 import { fetchUserProfile } from '../api/users';
@@ -36,7 +37,6 @@ import PageHeader from '../components/common/PageHeader';
 import PriceSummaryCard from '../components/common/PriceSummaryCard';
 import StickyActionBar from '../components/common/StickyActionBar';
 import CaptureGuideCard from '../components/order/CaptureGuideCard';
-import { mockShoes } from '../data/mockData';
 import {
   CustomerInfo,
   Discount,
@@ -148,7 +148,6 @@ const PREFERENCE_OPTIONS: Array<{
   { value: 'balanced', label: '均衡推荐', hint: '综合适配度、距离与体验' },
   { value: 'value', label: '价格更实惠', hint: '优先控制预付金额' },
   { value: 'quality', label: '品质更好', hint: '更看重洗护稳定性' },
-  { value: 'speed', label: '尽快完成', hint: '优先推荐更快排期' },
   { value: 'oxidation', label: '去氧化优先', hint: '更关注发黄与氧化' },
 ];
 
@@ -158,14 +157,20 @@ const emptyForm: CustomerInfo = {
   name: '',
   phone: '',
   address: '',
-  preferredShop: '',
-  pickupTime: '尽快',
   notes: '',
   servicePreference: 'balanced',
 };
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function normalizeServicePreference(
+  value?: ServicePreference | string | null
+): ServicePreference {
+  return PREFERENCE_OPTIONS.some((item) => item.value === value)
+    ? (value as ServicePreference)
+    : 'balanced';
 }
 
 function getWearWeight(level: ShoeConditionLevel) {
@@ -228,8 +233,7 @@ function createConditionSummary(shoeData: ShoeData) {
 function buildRecommendations(
   shoeData: ShoeData,
   sourceShops: Shop[],
-  preference: ServicePreference,
-  preferredShop: string
+  preference: ServicePreference
 ) {
   const shops = sourceShops.length > 0 ? sourceShops : DEFAULT_RECOMMENDATION_SHOPS;
   const baseFee = shoeData.pricing.baseFee;
@@ -269,7 +273,6 @@ function buildRecommendations(
         shop.oxidationScore * (hasOxidation ? 0.14 : 0.08) +
         materialMatchScore(shop, shoeData) +
         preferenceWeight(shop) +
-        (shop.name === preferredShop ? 8 : 0) +
         clamp(14 - shop.distanceKm * 2, 3, 14),
       addonTotal: () => (hasOxidation ? 8 : luxuryCare ? 6 : 4),
       serviceFee: (shop) =>
@@ -287,7 +290,6 @@ function buildRecommendations(
         shop.speedScore * 0.16 +
         shop.qualityScore * 0.12 +
         materialMatchScore(shop, shoeData) * 0.7 +
-        (shop.name === preferredShop ? 5 : 0) +
         clamp(15 - shop.distanceKm * 2.2, 2, 15),
       addonTotal: () => (hasOxidation ? 4 : 0),
       serviceFee: () => Math.round(6 + wearWeight * 2),
@@ -305,7 +307,6 @@ function buildRecommendations(
         materialMatchScore(shop, shoeData) * 1.25 +
         (luxuryCare ? 12 : 0) +
         preferenceWeight(shop) +
-        (shop.name === preferredShop ? 6 : 0) +
         clamp(13 - shop.distanceKm * 1.8, 2, 13),
       addonTotal: () => (luxuryCare ? 16 : 10),
       serviceFee: (shop) =>
@@ -430,6 +431,7 @@ export default function OrderFlowPage() {
   const [actionError, setActionError] = useState('');
   const [orderId, setOrderId] = useState('');
   const [paymentBaselineInfo, setPaymentBaselineInfo] = useState<CustomerInfo | null>(null);
+  const [analysisProgress, setAnalysisProgress] = useState(0.06);
 
   const getBoundOrderInfo = (
     baseInfo?: Partial<CustomerInfo> | null
@@ -468,8 +470,10 @@ export default function OrderFlowPage() {
     setEditableDetailMaterial(snapshot.confirmedShoeData.materials[1]?.material || '');
     setEditableWearLevel(snapshot.confirmedShoeData.wearLevel);
     setServicePreference(
-      (boundInfo.servicePreference as ServicePreference | undefined) ||
-        snapshot.servicePreference
+      normalizeServicePreference(
+        (boundInfo.servicePreference as ServicePreference | undefined) ||
+          snapshot.servicePreference
+      )
     );
     setSelectedPlanId(snapshot.selectedPlanId);
     setSelectedDiscountId(snapshot.selectedDiscountId);
@@ -544,9 +548,9 @@ export default function OrderFlowPage() {
 
         if (!mounted) return;
 
-        const initialPreference =
-          (getDefaultOrderInfo(profile)?.servicePreference as ServicePreference | undefined) ||
-          'balanced';
+        const initialPreference = normalizeServicePreference(
+          getDefaultOrderInfo(profile)?.servicePreference as ServicePreference | undefined
+        );
         const defaultOrderInfo = getDefaultOrderInfo(profile);
 
         setCurrentUser(profile);
@@ -556,8 +560,6 @@ export default function OrderFlowPage() {
         setServicePreference(initialPreference);
         setFormData((prev) => ({
           ...prev,
-          preferredShop: defaultOrderInfo?.preferredShop || nextShops[0]?.name || '',
-          pickupTime: defaultOrderInfo?.pickupTime || prev.pickupTime,
           name: defaultOrderInfo?.name || '',
           phone: defaultOrderInfo?.phone || '',
           address: defaultOrderInfo?.address || '',
@@ -615,9 +617,6 @@ export default function OrderFlowPage() {
     if (!currentUser) return [];
 
     return discounts.filter((discount) => {
-      const groupMatches =
-        discount.applicableGroup === 'all' || discount.applicableGroup === currentUser.group;
-      if (!groupMatches) return false;
       if ((discount.mode || 'normal') !== 'first_order') return true;
       return !hasOrderedOnce(currentUser.id);
     });
@@ -664,13 +663,8 @@ export default function OrderFlowPage() {
 
   const recommendations = useMemo(() => {
     if (!confirmedShoeData) return [];
-    return buildRecommendations(
-      confirmedShoeData,
-      shops,
-      servicePreference,
-      formData.preferredShop || ''
-    );
-  }, [confirmedShoeData, formData.preferredShop, servicePreference, shops]);
+    return buildRecommendations(confirmedShoeData, shops, servicePreference);
+  }, [confirmedShoeData, servicePreference, shops]);
 
   useEffect(() => {
     if (!recommendations.length) {
@@ -682,6 +676,24 @@ export default function OrderFlowPage() {
       recommendations.some((plan) => plan.id === prev) ? prev : recommendations[0].id
     );
   }, [recommendations]);
+
+  useEffect(() => {
+    if (step !== 'analyzing') {
+      setAnalysisProgress(0.06);
+      return;
+    }
+
+    setAnalysisProgress(0.08);
+    const start = Date.now();
+    const duration = 10000;
+    const timer = window.setInterval(() => {
+      const elapsed = Date.now() - start;
+      const nextValue = Math.min(0.92, 0.08 + (elapsed / duration) * 0.84);
+      setAnalysisProgress(nextValue);
+    }, 180);
+
+    return () => window.clearInterval(timer);
+  }, [step]);
 
   const selectedPlan =
     recommendations.find((plan) => plan.id === selectedPlanId) || recommendations[0] || null;
@@ -754,22 +766,34 @@ export default function OrderFlowPage() {
     });
   };
 
-  const startAnalysis = () => {
+  const startAnalysis = async () => {
+    const images = capturedImages.filter(Boolean) as string[];
+    if (images.length === 0) {
+      setActionError('请先上传鞋子图片后再识别。');
+      return;
+    }
+
     setActionError('');
     setStep('analyzing');
+    setAnalysisProgress(0.08);
 
-    window.setTimeout(() => {
-      const mock = mockShoes[Math.floor(Math.random() * mockShoes.length)];
+    try {
+      const response = await analyzeShoeImages(images);
+      const analyzed = response.result;
+      setAnalysisProgress(1);
       setActiveReportImageIndex(0);
-      setResult(mock);
-      setEditableShoeType(mock.shoeType);
-      setEditableBrand(mock.brand);
-      setEditableModel(mock.model);
-      setEditableUpperMaterial(mock.materials[0]?.material || '');
-      setEditableDetailMaterial(mock.materials[1]?.material || '');
-      setEditableWearLevel(mock.wearLevel);
+      setResult(analyzed);
+      setEditableShoeType(analyzed.shoeType);
+      setEditableBrand(analyzed.brand);
+      setEditableModel(analyzed.model);
+      setEditableUpperMaterial(analyzed.materials[0]?.material || '');
+      setEditableDetailMaterial(analyzed.materials[1]?.material || '');
+      setEditableWearLevel(analyzed.wearLevel);
       setStep('report');
-    }, 2200);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '识别失败，请稍后重试。');
+      setStep('capture');
+    }
   };
 
   const handleCapture = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -833,20 +857,9 @@ export default function OrderFlowPage() {
       return;
     }
 
-    if (!currentUser) {
-      redirectToAccountForOrderInfo();
-      return;
-    }
-
     const boundInfo = getBoundOrderInfo(
       getSelectedOrderInfo(currentUser, selectedOrderInfoId) || formData
     );
-
-    if (!hasRequiredOrderInfo(boundInfo)) {
-      setFormData(boundInfo);
-      redirectToAccountForOrderInfo();
-      return;
-    }
 
     setFormData(boundInfo);
     history.push('/app/order/result');
@@ -874,8 +887,8 @@ export default function OrderFlowPage() {
   };
 
   const handlePaymentSuccess = async () => {
-    if (!confirmedShoeData || !selectedPlan || !currentUser) {
-      setActionError('请先登录并补全账号默认订单资料。');
+    if (!confirmedShoeData || !selectedPlan) {
+      setActionError('订单数据不完整，请重新生成方案。');
       return;
     }
 
@@ -889,7 +902,7 @@ export default function OrderFlowPage() {
     );
 
     if (!hasRequiredOrderInfo(lockedOrderInfo)) {
-      setActionError('账号默认订单资料不完整，请先前往账号页补全。');
+      setActionError('订单资料不完整，请先补全取件信息。');
       return;
     }
 
@@ -918,8 +931,6 @@ export default function OrderFlowPage() {
       userName: lockedOrderInfo.name,
       userPhone: lockedOrderInfo.phone,
       userAddress: lockedOrderInfo.address,
-      preferredShop: lockedOrderInfo.preferredShop,
-      pickupTime: lockedOrderInfo.pickupTime,
       notes: lockedOrderInfo.notes,
       servicePreference,
       price: finalPrice,
@@ -946,7 +957,9 @@ export default function OrderFlowPage() {
       saveOrder(order);
       await createServerOrder(serverOrder);
       await markOrderPaid(id);
-      markOrderedOnce(currentUser.id);
+      if (currentUser?.id) {
+        markOrderedOnce(currentUser.id);
+      }
       setOrderId(id);
       setFormData(lockedOrderInfo);
       clearOrderResultSnapshot();
@@ -977,9 +990,6 @@ export default function OrderFlowPage() {
         />
         <div className="device-shell">
           <PageHeader
-            eyebrow="NEW ORDER"
-            title="拍照识别与方案推荐"
-            subtitle="先识别鞋况，再确认可修改信息；系统会读取账号默认订单资料，生成推荐方案并直接进入支付。"
             onBack={() => history.goBack()}
           />
 
@@ -1048,6 +1058,10 @@ export default function OrderFlowPage() {
               <IonCardContent className="stack-section" style={{ textAlign: 'center' }}>
                 <IonSpinner name="crescent" />
                 <h2 style={{ margin: 0 }}>正在识别鞋型、材质与磨损情况</h2>
+                <IonProgressBar value={analysisProgress} />
+                <p className="muted" style={{ margin: 0 }}>
+                  识别进度 {Math.max(1, Math.round(analysisProgress * 100))}%
+                </p>
                 <p>系统会先生成可修改的识别结果，再根据你的偏好推荐洗护方案。</p>
               </IonCardContent>
             </IonCard>
@@ -1219,7 +1233,7 @@ export default function OrderFlowPage() {
                     <div>
                       <h3 style={{ margin: 0 }}>推荐设置</h3>
                       <p className="muted" style={{ margin: '6px 0 0' }}>
-                        选择系统更偏向的方案方向，再确认意向店铺。
+                        选择系统更偏向的方案方向，门店会随推荐方案自动确定。
                       </p>
                     </div>
                   </div>
@@ -1248,21 +1262,6 @@ export default function OrderFlowPage() {
                         ?.hint
                     }
                   </p>
-                  <IonItem className="field-item">
-                    <IonLabel position="stacked">意向店铺</IonLabel>
-                    <IonSelect
-                      value={formData.preferredShop}
-                      onIonChange={(e) =>
-                        setFormData((prev) => ({ ...prev, preferredShop: e.detail.value || '' }))
-                      }
-                    >
-                      {shops.map((shop) => (
-                        <IonSelectOption key={shop.id} value={shop.name}>
-                          {shop.name}
-                        </IonSelectOption>
-                      ))}
-                    </IonSelect>
-                  </IonItem>
                 </IonCardContent>
               </IonCard>
 
@@ -1372,7 +1371,7 @@ export default function OrderFlowPage() {
                   {paymentNeedsReprice ? (
                     <div className="payment-warning">
                       <strong>订单信息已变化</strong>
-                      <p>当前资料会影响门店距离或排期，请先返回结果页重新生成推荐方案后再支付。</p>
+                      <p>当前资料会影响服务距离或覆盖范围，请先返回结果页重新生成推荐方案后再支付。</p>
                     </div>
                   ) : null}
                 </IonCardContent>
@@ -1424,7 +1423,7 @@ export default function OrderFlowPage() {
                     <br />
                     {selectedPlan?.shopName || '推荐门店'} · {selectedPlan?.title || '已锁定方案'}
                     <br />
-                    取件时间 {formData.pickupTime} · 取件地址 {formData.address}
+                    取件地址 {formData.address}
                   </p>
                   <div className="feature-item">
                     <strong>后续流程</strong>

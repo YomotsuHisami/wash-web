@@ -3,7 +3,6 @@ import { IonReactRouter } from '@ionic/react-router';
 import { Redirect, Route } from 'react-router-dom';
 import AppTabs from './layouts/AppTabs';
 import LaunchPage from './pages/LaunchPage';
-import MembershipPage from './pages/MembershipPage';
 import AdminPage from './pages/AdminPage';
 
 setupIonicReact();
@@ -15,7 +14,6 @@ export default function App() {
         <IonRouterOutlet>
           <Route exact path="/" component={LaunchPage} />
           <Route exact path="/intro" render={() => <Redirect to="/app/home" />} />
-          <Route exact path="/membership" component={MembershipPage} />
           <Route path="/admin" component={AdminPage} />
           <Route path="/app" component={AppTabs} />
           <Route render={() => <Redirect to="/" />} />
