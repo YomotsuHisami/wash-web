@@ -45,6 +45,7 @@ jobs:
 
             echo "安装依赖"
             npm install --prefer-offline --no-audit --no-fund
+            npm run build
 
             echo "重启服务"
             pm2 restart website
