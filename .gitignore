@@ -9,3 +9,4 @@ waste/
 .env*
 !.env.example
 .history/
+*.code-workspace
